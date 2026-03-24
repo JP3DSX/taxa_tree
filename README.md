@@ -46,16 +46,18 @@ Wikidata SPARQL API から任意の分類群を BFS（幅優先探索）で取�
 │   └── taxa_html.py                HTML生成・UI
 └── result/                         出力先（実行時に自動作成）
     ├── taxa_cache_Q25341.json       キャッシュ（JSON）
-    └── taxa_スズメ目_Q25341.html    系統図 HTML
+    ├── taxa_スズメ目_Q25341.html    系統図 HTML
+    ├── taxa_哺乳綱_Q10908.html      系統図 HTML（複数生成可）
+    └── index.html                   ランディングページ（系統図一覧・自動更新）
 ```
 
 ### 各ファイルの責務
 
 | ファイル | 行数 | 責務 |
 |---|---|---|
-| `taxa_tree.py` | 227行 | 引数解析・QID解決・キャッシュ管理・HTML保存 |
-| `module/taxa_fetch.py` | 755行 | SPARQL・BFS・進捗バー・接続診断 |
-| `module/taxa_html.py` | 784行 | HTML テンプレート・`make_html()` |
+| `taxa_tree.py` | 281行 | 引数解析・モード切替・キャッシュ管理・HTML保存 |
+| `module/taxa_fetch.py` | 797行 | SPARQL・BFS・画像URL解決・進捗バー・接続診断 |
+| `module/taxa_html.py` | 1,020行 | HTML テンプレート・`make_html()` |
 | `module/__init__.py` | 1行 | パッケージ宣言 |
 
 **UI を変更する場合は `module/taxa_html.py` のみを編集すればよく、`module/taxa_fetch.py` のレビューは不要です。**
@@ -85,7 +87,6 @@ python taxa_tree.py --qid Q756            # バラ属
 :: 学名・和名で検索（候補一覧から番号を選択）
 python taxa_tree.py --taxon "Passeriformes"
 python taxa_tree.py --taxon "カラス科"
-python taxa_tree.py --taxon "Rosa"
 ```
 
 ### オプション一覧
@@ -93,26 +94,42 @@ python taxa_tree.py --taxon "Rosa"
 | 引数 | デフォルト | 説明 |
 |---|---|---|
 | `--qid QID` | — | Wikidata QID を直接指定 |
-| `--taxon NAME` | — | 学名・和名で検索（`--qid` と排他） |
+| `--taxon NAME` | — | 学名・和名で検索（`--render` / `--cached` / `--test` と排他） |
+| `--render` | — | **fetch をスキップし HTML のみ再生成**。`--qid` で対象キャッシュを指定可（省略時は最新を自動選択） |
+| `--cached` | — | `--render` の後方互換エイリアス |
+| `--test` | — | 接続診断のみ実行 |
 | `--split RANK` | `family` | Phase 1/2 の分割ランク |
 | `--stop RANK` | `species` | 取得の終端ランク |
 | `--fast` | false | Phase 1（`--split` まで）で終了 |
-| `--cached` | false | `result/` のキャッシュを再利用して HTML のみ再生成 |
 | `--output FILE` | 自動生成 | 出力 HTML ファイルパスを明示指定 |
 | `--proxy URL` | 環境変数 | プロキシ URL |
-| `--test` | — | 接続診断のみ実行 |
+
+### 実行例
 
 ```bat
-:: オプション組み合わせ例
+:: 通常取得
 python taxa_tree.py --qid Q25341 --fast                    # 科まで高速取得
 python taxa_tree.py --qid Q25341 --split genus             # 属レベルで Phase 分割
-python taxa_tree.py --qid Q25341 --cached                  # キャッシュ再利用
 python taxa_tree.py --qid Q25341 --output docs/index.html  # 出力先を指定
+
+:: HTML のみ再生成（UI 変更後に fetch をスキップして再利用）
+python taxa_tree.py --qid Q25341 --render    # 指定 QID のキャッシュを使用
+python taxa_tree.py --render                 # 最新キャッシュを自動選択
 
 :: 社内プロキシ環境
 python taxa_tree.py --proxy http://proxy.example.com:8080 --qid Q25341
 set HTTPS_PROXY=http://proxy.example.com:8080
 ```
+
+### 動作モード一覧
+
+| モード | コマンド例 | fetch | HTML生成 |
+|---|---|---|---|
+| 新規取得 | `--qid Q25341` | ✅ | ✅ |
+| HTML 再生成（QID指定） | `--qid Q25341 --render` | スキップ | ✅ |
+| HTML 再生成（自動選択） | `--render` | スキップ | ✅ |
+| 高速取得（科まで） | `--qid Q25341 --fast` | ✅（Phase1のみ） | ✅ |
+| 接続診断 | `--test` | スキップ | スキップ |
 
 ---
 
@@ -198,11 +215,15 @@ Settings → Pages → Source を **「GitHub Actions」** に設定。
 | 折りたたむ | 全ノードを折りたたむ | — |
 | 全体表示 | ズームリセット | — |
 
+### 検索ボックス
+
+折りたたまれた状態でも全ノードを対象に検索します。ヒットしたノードは自動展開・ハイライト表示され、画面が自動フィットします。空文字で検索するとリセットされます。
+
 ---
 
 ## コード構成
 
-### taxa_tree.py（227行） ─ エントリポイント
+### taxa_tree.py（281行） ─ エントリポイント
 
 ```
 taxa_tree.py
@@ -213,138 +234,99 @@ taxa_tree.py
 │   ├── module.taxa_fetch  （取得・モデル関連の関数・定数）
 │   └── module.taxa_html   （make_html）
 │
+├── _load_cache(qid) → (tree, path)  ★ v5追加
+│   ├── qid 指定時: OUTPUT_DIR/taxa_cache_<qid>.json を優先検索
+│   └── qid 省略時: 更新日時が最新のキャッシュを自動選択
+│
+├── _save_html(tree, output_arg)  ★ v5追加
+│   ├── make_html() → HTML生成 → ファイル書き出し（ディレクトリ自動作成）
+│   └── make_index_html() → result/index.html を自動更新（系統図一覧ページ）
+│
 └── main()
-    ├── 引数解析（argparse）
-    ├── --test   → run_test()
-    ├── --cached → キャッシュ検索・読み込み
+    ├── --test     → run_test() して終了
+    ├── --render   → _load_cache() → _save_html() して終了  ★ v5追加
+    ├── --cached   → --render の後方互換エイリアス
     └── 新規取得フロー
-        ├── pick_taxon() or --qid
+        ├── --taxon → pick_taxon() / --qid → QID 直接使用
         ├── fetch_root_info()
         ├── split_rank 自動調整
         ├── fetch_phase1()
         ├── fetch_phase2()  （--fast でスキップ）
         ├── キャッシュ保存（OUTPUT_DIR/taxa_cache_<QID>.json）
-        └── make_html() → HTML保存（OUTPUT_DIR/taxa_<和名>_<QID>.html）
+        └── _save_html()
 ```
 
 ---
 
-### module/taxa_fetch.py（755行） ─ データ取得・モデル構築
+### module/taxa_fetch.py（797行） ─ データ取得・モデル構築
 
 ```
 taxa_fetch.py
 ├── 定数・設定（〜L135）
-│   ├── RANK_ORD[24]      全生物界共通の階層順（domain → form）
-│   ├── RANK_MAP[25]      Wikidata P105 QID → rank 文字列
-│   └── DEFAULT_SPLIT     "family"
+│   ├── RANK_ORD[24] / RANK_MAP[25] / DEFAULT_SPLIT
 │
 ├── ランクユーティリティ（〜L166）
-│   ├── rank_index()      RANK_ORD 上の位置（未知ランクは末尾）
-│   ├── is_leaf_rank()    亜種・変種・品種はリーフ扱い
-│   ├── infer_rank()      P105 未登録ノードの rank を学名語数から推定
-│   └── sanitize_filename()  ファイル名安全化
+│   ├── rank_index / is_leaf_rank / infer_rank / sanitize_filename
 │
 ├── ANSI 進捗バー（〜L233）
-│   ├── _bar_state{}      グローバルバー状態（always-on 設計）
-│   ├── bar_update()      状態更新 + 再描画
-│   ├── pprint()          ログ出力（\n）+ バーを即座に再描画
-│   ├── bar_done()        Phase 2 完了時の確定改行
-│   └── fmt_node()        [QID(10桁)] 📁/🐦 英語名 / 日本語名  (rank)
+│   └── _bar_state / bar_update / pprint / bar_done / fmt_node
 │
 ├── Session / SSL（〜L278）
-│   └── init_session()    SSL自動検出（True→False）・プロキシ対応
+│   └── init_session（SSL自動検出・プロキシ対応）
 │
 ├── SPARQL（〜L308）
-│   └── sparql()          リトライ4回・429対応・silent モード
+│   └── sparql（リトライ4回・429対応）
 │
 ├── タクソン検索（〜L393）
-│   ├── search_taxon()    wbsearchentities API（日英両方で検索）
-│   └── pick_taxon()      候補表示 → ユーザー選択 → (qid, label)
+│   └── search_taxon / pick_taxon
 │
 ├── ルートノード取得（〜L453）
-│   └── fetch_root_info() Entity API → SPARQL フォールバック
+│   └── fetch_root_info（Entity API → SPARQL フォールバック）
 │
 ├── 子ノード取得（〜L531）
-│   ├── get_direct_children()  P171 + P18（画像）+ P1843（和名）
-│   └── _parse_child_row()     image_url・wiki_url フィールドを生成
-│                              Special:FilePath?width=120 方式
+│   ├── get_direct_children（P171 + P18 + P1843）
+│   ├── _parse_child_row（image_url・wiki_url 生成）
+│   └── resolve_image_url()  ★ v5追加
+│       Wikimedia Thumbnail API で直接 CDN URL を取得
+│       失敗時は Special:FilePath にフォールバック
 │
 ├── 種数推定（〜L558）
-│   └── estimate_species_count()  P171+ COUNT・25秒タイムアウト
-│
 ├── Phase 1 BFS（〜L608）
-│   └── fetch_phase1(root_node, split_rank) → (tree, nodes)
-│
 ├── Phase 2 BFS（〜L695）
-│   ├── _bfs_subtree()    1ノード分のサブBFS
-│   └── fetch_phase2()    進捗バー付きサブBFS
-│
-└── ユーティリティ（〜L755）
-    ├── _sort_children()  rank 順 → 学名順でソート（再帰）
-    ├── _walk()           ツリー全ノードに関数を適用
-    ├── run_test()        4ステップ接続診断
-    └── _elapsed()        経過時間文字列
-```
-
-**公開 API（`taxa_tree.py` から利用）：**
-
-```python
-from module.taxa_fetch import (
-    DEFAULT_SPLIT, RANK_ORD,
-    init_session, run_test,
-    pick_taxon, fetch_root_info,
-    fetch_phase1, fetch_phase2,
-    estimate_species_count,
-    rank_index, sanitize_filename,
-    _walk, _elapsed,
-)
+└── ユーティリティ・診断（〜L797）
+    └── _sort_children / _walk / _elapsed / run_test
 ```
 
 ---
 
-### module/taxa_html.py（784行） ─ HTML 生成・UI
+### module/taxa_html.py（1,020行） ─ HTML 生成・UI
 
 ```
 taxa_html.py
 ├── import（json, datetime のみ）
 │
-├── HTML = r"""..."""（〜L780）
+├── HTML = r"""..."""（〜L1016）
 │   ├── CSS
-│   │   ├── ダーク / ライトテーマ（:root / [data-theme="light"]）
-│   │   └── @media (pointer: coarse)  モバイル専用スタイル
-│   │       ├── ツールチップを画面下部中央に固定
-│   │       ├── 閉じるボタン（#tt-close）を表示
-│   │       └── 長押しフィードバック（.pressing クラス）
-│   │
+│   │   ├── ダーク / ライトテーマ
+│   │   └── @media (pointer: coarse) モバイル専用
 │   ├── HTML 構造
-│   │   ├── ヘッダー（🌙 JA/EN LR/TB 🖼 各ボタン）
-│   │   ├── ツールチップ（#tt）
-│   │   │   ├── 画像エリア（#tt-img / #tt-ph フォールバック）
-│   │   │   ├── テキストエリア（ランク・学名・和名・種数）
-│   │   │   ├── #tt-wiki（Wikipedia ボタン・種のみ表示）
-│   │   │   └── #tt-close（✕ボタン・モバイルのみ表示）
-│   │   └── SVG ツリー
-│   │
+│   │   ├── ヘッダー / ツールチップ / SVG ツリー
 │   └── JavaScript
 │       ├── isTouchDev = matchMedia('pointer: coarse')
-│       ├── テーマ / 言語 / レイアウト / 画像 ON/OFF（localStorage 保存）
-│       ├── D3.js ツリー（nodeSize・linkPath・nodeTransform）
-│       ├── イベントハンドラ
-│       │   ├── PC:    mouseover → ツールチップ / click → 展開 or Wikipedia
-│       │   └── Touch: touchstart → 長押し / touchend → 短タップ
-│       ├── 長押し  startLongPress / cancelLongPress / endTouch（LP_MS=480ms）
-│       ├── ツールチップ  showTT / showTTTouch / schedulHide / cancelHide
-│       ├── Wikipedia  openWiki（JA/EN 連動）
-│       └── 検索  doSrch（学名・和名両方）
+│       ├── テーマ / 言語 / レイアウト / 画像 ON/OFF（localStorage）
+│       ├── D3.js ツリー
+│       ├── PC: mouseover → ツールチップ / click → 展開 or Wikipedia
+│       ├── Touch: 長押し → ツールチップ / 短タップ → 展開 or Wikipedia
+│       ├── Wikipedia: openWiki（JA/EN 連動）
+│       └── 検索: doSrch  ★ v5修正
+│           ├── walkAll() で _children を含む全ノード走査
+│           ├── ヒット時に祖先パスを自動展開
+│           └── fitV() で自動フィット（260ms後）
 │
-└── make_html(tree: dict, root_qid: str) -> str（〜L784）
-    __TITLE__ / __QID__ / __DATE__ / __DATA__ を置換して返す
-```
-
-**公開 API（`taxa_tree.py` から利用）：**
-
-```python
-from module.taxa_html import make_html
+└── make_html(tree, root_qid) → str
+└── make_index_html(output_dir) → str
+    result/ 内の taxa_*.html を走査してランディングページ HTML を生成
+    対応する taxa_cache_<QID>.json が存在すれば種数・科数・ノード数も表示
 ```
 
 ---
@@ -353,31 +335,24 @@ from module.taxa_html import make_html
 
 ### v5.0（現バージョン / ベースライン）
 
-**確定日: 2026-03 / 合計1,766行（taxa_tree: 227 / taxa_fetch: 755 / taxa_html: 784）**
-
-#### 変更内容: ロジック・UI・エントリポイントを分離
-
-単一ファイル（1,698行）を3ファイルに分割。
+**確定日: 2026-03 / 合計 2,098行（taxa_tree: 281 / taxa_fetch: 797 / taxa_html: 1,020）**
 
 | 変更 | 内容 |
 |---|---|
-| `taxa_tree.py` | エントリポイントのみに縮小（227行）。`OUTPUT_DIR` の唯一の設定箇所 |
-| `module/taxa_fetch.py` | データ取得・BFS・進捗バー・診断を集約 |
-| `module/taxa_html.py` | HTML テンプレート・`make_html()` を集約 |
-| `module/__init__.py` | パッケージ宣言（1行） |
+| **ファイル分割** | 単一ファイル（1,698行）を3ファイルに分割。UI変更時は `taxa_html.py` のみ編集でよい |
+| **`--render` フラグ** | fetch をスキップして HTML のみ再生成するモードを追加。`--qid` で対象キャッシュを指定可 |
+| **`_load_cache()` / `_save_html()`** | HTML再生成ロジックを独立関数として切り出し。`main()` の可読性を改善 |
+| **`make_index_html()`** | `result/` 内の系統図一覧をランディングページ（`index.html`）として自動生成。HTML 生成のたびに自動更新 |
+| **検索の全ノード走査** | `walkAll()` を追加。折りたたみ状態でも全ノードを検索可能に。ヒット時に自動展開・自動フィット |
+| **画像 URL の API 対応** | `resolve_image_url()` を新設。Wikimedia Thumbnail API で CDN URL を直接取得し、SVG 等の表示問題を解消 |
 
-UI 変更時は `module/taxa_html.py` のみを編集すれば、`module/taxa_fetch.py` のレビューは不要。
+> **画像修正の注意:** `--render` での再生成では旧 URL が使われます。`--qid` での再取得が必要です。
 
 ---
 
 ### v4.0（2026-03 / 1,698行）
 
-| 変更 | 内容 |
-|---|---|
-| 画像URL修正 | MD5方式を廃止し `Special:FilePath?width=120` に統一。SVG 画像が表示されなかった問題を解消 |
-| Wikipedia リンク | 種クリックで Wikipedia を開く。ツールチップに「Wikipedia で開く ↗」ボタン |
-| ツールチップ修正 | `pointer-events: auto`・遅延非表示（220ms）・ホバー中はキャンセル |
-| モバイル対応 | `pointer: coarse` で検出。長押し→ツールチップ、短タップ→展開/Wikipedia |
+画像URL修正（MD5→Special:FilePath）・Wikipedia リンク・ツールチップ操作性改善・モバイル対応（長押し/短タップ分離）。
 
 ---
 

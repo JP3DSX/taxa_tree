@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>taxa_tree — 系統図一覧</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
+  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;
+  --brd:#30363d;--hl:#f0b429;--grn:#3fb950;
+}
+[data-theme="light"]{
+  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;
+  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
+  --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;
+}
+html,body{min-height:100%;background:var(--bg);color:var(--txt);
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
+  transition:background .2s,color .2s}
+header{background:var(--bg2);border-bottom:1px solid var(--brd);
+  padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+header h1 span{font-size:20px}
+#gen-date{font-size:11px;color:var(--txt3)}
+.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.tb:hover{border-color:var(--txt2);color:var(--txt)}
+main{max-width:960px;margin:0 auto;padding:28px 24px}
+.empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;
+  padding:18px;text-decoration:none;color:inherit;
+  transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}
+.card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}
+.card-title{font-size:15px;font-weight:600}
+.card-sci{font-size:12px;font-style:italic;color:var(--txt2)}
+.card-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.badge{font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap}
+.b-sp{background:rgba(134,239,172,.12);color:#86efac;border:1px solid rgba(134,239,172,.25)}
+.b-fa{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)}
+.b-nd{background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)}
+.b-dt{background:var(--bg3);color:var(--txt3);border:1px solid var(--brd)}
+[data-theme="light"] .b-sp{background:rgba(21,128,61,.1);color:#15803d;border-color:rgba(21,128,61,.3)}
+[data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}
+[data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}
+.arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}
+footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
+  border-top:1px solid var(--brd);margin-top:32px}
+</style></head>
+<body>
+<header>
+  <h1><span>🌿</span> 系統図 一覧</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="gen-date"></span>
+    <button class="tb" id="btn-theme" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+<main>
+<div class="grid">
+<a class="card" href="taxa_スズメ目_Q25341.html">
+  <div class="card-rank">目 Q25341</div>
+  <div class="card-title">スズメ目</div>
+  <div class="card-sci">Passeriformes</div>
+  <div class="card-meta"><span class="badge b-sp">🐦 6,144種</span><span class="badge b-fa">🏷 90科</span><span class="badge b-nd">📦 7,231件</span><span class="badge b-dt">📅 2026-03-24</span></div>
+  <div class="arrow">系統図を開く →</div>
+</a>
+</div>
+</main>
+<footer>データ: Wikidata &nbsp;|&nbsp; 生成: 2026-03-24</footer>
+<script>
+document.getElementById("gen-date").textContent = "更新: 2026-03-24";
+function toggleTheme(){
+  const h=document.documentElement,t=h.getAttribute("data-theme")==="dark"?"light":"dark";
+  h.setAttribute("data-theme",t);
+  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+  localStorage.setItem("taxa_theme",t);
+}
+(function(){
+  const t=localStorage.getItem("taxa_theme")||"dark";
+  document.documentElement.setAttribute("data-theme",t);
+  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+})();
+</script>
+</body></html>

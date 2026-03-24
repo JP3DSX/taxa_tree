@@ -596,28 +596,66 @@ const cntSp = d => {
 };
 
 // ─── 検索 ─────────────────────────────────────────────────────────
+// _children を含むツリー全ノードを走査するヘルパー
+function walkAll(node, fn) {
+  fn(node);
+  const kids = node.children || node._children || [];
+  kids.forEach(c => walkAll(c, fn));
+}
+
 function doSrch(q) {
   const v = q.trim().toLowerCase();
+  // ハイライトをリセット
   g.selectAll(".nd").classed("nh", false).classed("nm", false);
-  if (!v) return;
-  const hit = new Set();
-  root.descendants().forEach(d => {
-    if ((d.data.name||"").toLowerCase().includes(v) ||
-        (d.data.ja  ||"").toLowerCase().includes(v)) {
+  if (!v) {
+    // 空文字ならリセットのみ
+    update(root);
+    return;
+  }
+
+  const hit      = new Set(); // ヒットノードおよびその祖先
+  const hitDirect = new Set(); // ヒットしたノード自身
+
+  // _children を含む全ノードを走査
+  walkAll(root, d => {
+    const name = (d.data.name || "").toLowerCase();
+    const ja   = (d.data.ja   || "").toLowerCase();
+    if (name.includes(v) || ja.includes(v)) {
+      hitDirect.add(d.data.id);
       hit.add(d.data.id);
+      // 祖先パスをすべて展開してマーク
       let p = d.parent;
       while (p) {
         hit.add(p.data.id);
-        if (p._children) { p.children = p._children; p._children = null; }
+        // 折りたたまれていたら展開
+        if (p._children) {
+          p.children  = p._children;
+          p._children = null;
+        }
         p = p.parent;
       }
     }
   });
-  if (hit.size) update(root);
+
+  // ヒットしたノードの子孫も展開（ヒットノード自体の下も見せる）
+  walkAll(root, d => {
+    if (hitDirect.has(d.data.id) && d._children) {
+      d.children  = d._children;
+      d._children = null;
+    }
+  });
+
+  // ツリーを再描画してハイライトを適用
+  update(root);
+
   g.selectAll(".nd")
-    .classed("nh", d => (d.data.name||"").toLowerCase().includes(v) ||
-                        (d.data.ja  ||"").toLowerCase().includes(v))
+    .classed("nh", d => hitDirect.has(d.data.id))
     .classed("nm", d => !hit.has(d.data.id));
+
+  // ヒットノードが画面内に入るよう自動フィット
+  if (hit.size > 0) {
+    setTimeout(() => fitV(false), 260);
+  }
 }
 
 // ─── デバイス判定 ───────────────────────────────────────────────
@@ -721,7 +759,10 @@ function showTT(e, d) {
   if (d.data.image_url) {
     // サムネイルURLの解像度を220pxに差し替え
     // Special:FilePath?width= 方式: width値を220に差し替え
-    const large = d.data.image_url.replace(/[?&]width=\d+/, '?width=220');
+    // Wikimedia API URL の w= パラメータと Special:FilePath の width= 両方に対応
+    const large = d.data.image_url
+      .replace(/\/\d+px-/, '/220px-')           // CDN thumb URL
+      .replace(/[?&]width=\d+/, '?width=220');  // Special:FilePath URL
     imgEl.src = large;
     imgEl.classList.remove("hidden");
     phEl.classList.add("hidden");
@@ -777,3 +818,201 @@ def make_html(tree: dict, root_qid: str) -> str:
             .replace("__QID__",   root_qid)
             .replace("__DATE__",  date)
             .replace("__DATA__",  js))
+
+# ─────────────────────────────────────────────────────────────────
+#  ランディングページ生成
+# ─────────────────────────────────────────────────────────────────
+
+INDEX_HTML = r"""<!DOCTYPE html>
+<html lang="ja" data-theme="dark"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>taxa_tree — 系統図一覧</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
+  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;
+  --brd:#30363d;--hl:#f0b429;--grn:#3fb950;
+}
+[data-theme="light"]{
+  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;
+  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
+  --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;
+}
+html,body{min-height:100%;background:var(--bg);color:var(--txt);
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
+  transition:background .2s,color .2s}
+header{background:var(--bg2);border-bottom:1px solid var(--brd);
+  padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+header h1 span{font-size:20px}
+#gen-date{font-size:11px;color:var(--txt3)}
+.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.tb:hover{border-color:var(--txt2);color:var(--txt)}
+main{max-width:960px;margin:0 auto;padding:28px 24px}
+.empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;
+  padding:18px;text-decoration:none;color:inherit;
+  transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}
+.card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}
+.card-title{font-size:15px;font-weight:600}
+.card-sci{font-size:12px;font-style:italic;color:var(--txt2)}
+.card-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.badge{font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap}
+.b-sp{background:rgba(134,239,172,.12);color:#86efac;border:1px solid rgba(134,239,172,.25)}
+.b-fa{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)}
+.b-nd{background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)}
+.b-dt{background:var(--bg3);color:var(--txt3);border:1px solid var(--brd)}
+[data-theme="light"] .b-sp{background:rgba(21,128,61,.1);color:#15803d;border-color:rgba(21,128,61,.3)}
+[data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}
+[data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}
+.arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}
+footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
+  border-top:1px solid var(--brd);margin-top:32px}
+</style></head>
+<body>
+<header>
+  <h1><span>🌿</span> 系統図 一覧</h1>
+  <div style="display:flex;align-items:center;gap:12px">
+    <span id="gen-date"></span>
+    <button class="tb" id="btn-theme" onclick="toggleTheme()">🌙</button>
+  </div>
+</header>
+<main>
+__CARDS__
+</main>
+<footer>データ: Wikidata &nbsp;|&nbsp; 生成: __DATE__</footer>
+<script>
+document.getElementById("gen-date").textContent = "更新: __DATE__";
+function toggleTheme(){
+  const h=document.documentElement,t=h.getAttribute("data-theme")==="dark"?"light":"dark";
+  h.setAttribute("data-theme",t);
+  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+  localStorage.setItem("taxa_theme",t);
+}
+(function(){
+  const t=localStorage.getItem("taxa_theme")||"dark";
+  document.documentElement.setAttribute("data-theme",t);
+  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+})();
+</script>
+</body></html>"""
+
+# ランク日本語表記（index ページ用）
+_RANK_JA = {
+    "domain": "域", "kingdom": "界", "phylum": "門", "subphylum": "亜門",
+    "class": "綱", "subclass": "亜綱", "order": "目", "suborder": "亜目",
+    "family": "科", "subfamily": "亜科", "genus": "属", "species": "種",
+    "unknown": "?",
+}
+
+
+def make_index_html(output_dir) -> str:
+    """
+    output_dir 内の taxa_*.html を走査してランディングページ HTML を返す。
+    対応する taxa_cache_<QID>.json が存在すれば種数・属数・科数も表示する。
+
+    output_dir: str または Path
+    """
+    from pathlib import Path as _Path
+    import json as _json
+    import re as _re
+
+    out_dir = _Path(output_dir)
+    date    = datetime.now().strftime("%Y-%m-%d")
+
+    # taxa_*.html を更新日時の新しい順に列挙
+    taxa_files = sorted(
+        out_dir.glob("taxa_*.html"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    if not taxa_files:
+        cards_html = (
+            '<div class="empty">'
+            '<p>📂 まだ系統図がありません。</p>'
+            '<p style="margin-top:8px;font-size:12px">'
+            'python taxa_tree.py --qid Q25341 を実行してください。</p>'
+            '</div>'
+        )
+    else:
+        cards = []
+        for html_path in taxa_files:
+            # ファイル名から QID を抽出: taxa_<name>_<QID>.html
+            m = _re.search(r'_(Q\d+)\.html$', html_path.name)
+            qid = m.group(1) if m else ""
+
+            # キャッシュ JSON から詳細情報を取得
+            sci_name = ja_name = rank = ""
+            sp_count = ge_count = fa_count = node_count = 0
+            cache_path = out_dir / f"taxa_cache_{qid}.json" if qid else None
+            if cache_path and cache_path.exists():
+                try:
+                    with open(cache_path, encoding="utf-8") as f:
+                        tree = _json.load(f)
+                    sci_name   = tree.get("name", "")
+                    ja_name    = tree.get("ja",   "")
+                    rank       = tree.get("rank",  "")
+                    # ノード統計
+                    stack = [tree]
+                    while stack:
+                        nd = stack.pop()
+                        node_count += 1
+                        r = nd.get("rank", "")
+                        if r == "species":
+                            sp_count += 1
+                        elif r == "genus":
+                            ge_count += 1
+                        elif r == "family":
+                            fa_count += 1
+                        stack.extend(nd.get("children", []))
+                except Exception:
+                    pass
+
+            # キャッシュがない場合はファイル名から推測
+            if not sci_name:
+                stem    = html_path.stem          # taxa_スズメ目_Q25341
+                parts   = stem.split("_")
+                sci_name = parts[-2] if len(parts) >= 3 else stem
+
+            rank_ja   = _RANK_JA.get(rank, rank)
+            file_date = datetime.fromtimestamp(
+                html_path.stat().st_mtime
+            ).strftime("%Y-%m-%d")
+            rel_path  = html_path.name
+
+            # バッジ HTML
+            badges = []
+            if sp_count:
+                badges.append(f'<span class="badge b-sp">🐦 {sp_count:,}種</span>')
+            if fa_count:
+                badges.append(f'<span class="badge b-fa">🏷 {fa_count:,}科</span>')
+            if node_count:
+                badges.append(f'<span class="badge b-nd">📦 {node_count:,}件</span>')
+            badges.append(f'<span class="badge b-dt">📅 {file_date}</span>')
+
+            title_html = ja_name if ja_name else sci_name
+            sub_html   = f'<div class="card-sci">{sci_name}</div>' if ja_name else ""
+
+            cards.append(
+                f'<a class="card" href="{rel_path}">\n'
+                f'  <div class="card-rank">{rank_ja} {qid}</div>\n'
+                f'  <div class="card-title">{title_html}</div>\n'
+                f'  {sub_html}\n'
+                f'  <div class="card-meta">{"".join(badges)}</div>\n'
+                f'  <div class="arrow">系統図を開く →</div>\n'
+                f'</a>'
+            )
+
+        grid_html = '<div class="grid">\n' + "\n".join(cards) + "\n</div>"
+        cards_html = grid_html
+
+    return (INDEX_HTML
+            .replace("__CARDS__", cards_html)
+            .replace("__DATE__",  date))

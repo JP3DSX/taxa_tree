@@ -52,7 +52,7 @@ except Exception:
 
 ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS  = {
-    "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
+    "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
     "Accept":     "application/sparql-results+json",
 }
 
@@ -488,24 +488,21 @@ def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
     if not child_rank or child_rank == "unknown":
         child_rank = infer_rank(sci, parent_rank)
 
-    # P18（画像）→ Special:FilePath?width= 方式でサムネイル URL を生成
-    # MD5 方式は SVG で .png 拡張子が必要など複雑なため、
-    # Wikimedia 公式リダイレクト URL に一本化する
+    # P18（画像）→ Wikimedia Thumbnail API で直接 CDN URL を取得
     image_url = ""
     img_val   = row.get("img", {}).get("value", "")
     if img_val:
+        # ファイル名を抽出（Special:FilePath 形式または File: 形式）
         if "Special:FilePath/" in img_val:
-            # http → https に統一し、width パラメータを付加
-            base = img_val.split("?")[0].replace("http://", "https://")
-            image_url = f"{base}?width=120"
-        elif img_val.startswith("File:") or img_val.startswith("file:"):
-            fname = urllib.parse.quote(
-                img_val[5:].replace(" ", "_"), safe=""
+            filename = urllib.parse.unquote(
+                img_val.split("Special:FilePath/")[-1].split("?")[0]
             )
-            image_url = (
-                f"https://commons.wikimedia.org/wiki/Special:FilePath/"
-                f"{fname}?width=120"
-            )
+        elif img_val.lower().startswith("file:"):
+            filename = img_val[5:]
+        else:
+            filename = ""
+        if filename:
+            image_url = resolve_image_url(filename, width=120)
 
     # Wikidata エンティティページ URL（QIDから常に生成可能）
     wiki_url = f"https://www.wikidata.org/wiki/{child_qid}"
@@ -522,7 +519,52 @@ def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
         node["image_url"] = image_url
     return node
 
-# commons_thumb_url は v4 で Special:FilePath 方式に統一したため削除
+# ─────────────────────────────────────────────────────────────────
+#  Wikimedia Commons 画像 URL 解決
+# ─────────────────────────────────────────────────────────────────
+
+def resolve_image_url(filename: str, width: int = 120) -> str:
+    """
+    Wikimedia Thumbnail API でファイル名から直接の CDN URL を取得する。
+    Special:FilePath はリダイレクトのため SVG <image> で動作しない場合があり、
+    API で thumb URL を直接取得することで確実に表示できる。
+
+    API: https://commons.wikimedia.org/w/api.php
+         action=query & titles=File:xxx & prop=imageinfo & iiprop=url
+         & iiurlwidth=120
+    """
+    if not filename:
+        return ""
+    # "File:" プレフィックスを正規化
+    name = filename
+    if name.lower().startswith("file:"):
+        name = name[5:]
+    name = name.replace(" ", "_")
+    title = f"File:{name}"
+    try:
+        r = get_session().get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action":    "query",
+                "titles":    title,
+                "prop":      "imageinfo",
+                "iiprop":    "url",
+                "iiurlwidth": str(width),
+                "format":    "json",
+            },
+            timeout=10,
+        )
+        pages = r.json().get("query", {}).get("pages", {})
+        for page in pages.values():
+            ii = page.get("imageinfo", [])
+            if ii and ii[0].get("thumburl"):
+                return ii[0]["thumburl"]
+    except Exception:
+        pass
+    # API 失敗時のフォールバック: Special:FilePath
+    encoded = urllib.parse.quote(name, safe="")
+    return f"https://commons.wikimedia.org/wiki/Special:FilePath/{encoded}?width={width}"
+
 
 # ─────────────────────────────────────────────────────────────────
 #  種数の事前推定
@@ -748,3 +790,7 @@ SELECT ?child ?childLabel ?name ?rank WHERE {
         print(f"   [{h['qid']:12s}] {h['label']:<25}  {h['desc'][:50]}")
 
     print("\n✅  診断完了 — python taxa_tree.py --qid Q25341 --fast で実行できます")
+
+# ─────────────────────────────────────────────────────────────────
+#  HTML テンプレート
+# ─────────────────────────────────────────────────────────────────
