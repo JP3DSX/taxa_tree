@@ -52,7 +52,7 @@ except Exception:
 
 ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS  = {
-    "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
+    "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
     "Accept":     "application/sparql-results+json",
 }
 
@@ -552,7 +552,10 @@ def resolve_image_url(filename: str, width: int = 120) -> str:
                 "iiurlwidth": str(width),
                 "format":    "json",
             },
-            timeout=10,
+            headers={
+                "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
+            },
+            timeout=15,
         )
         pages = r.json().get("query", {}).get("pages", {})
         for page in pages.values():
@@ -561,9 +564,18 @@ def resolve_image_url(filename: str, width: int = 120) -> str:
                 return ii[0]["thumburl"]
     except Exception:
         pass
-    # API 失敗時のフォールバック: Special:FilePath
+    # API 失敗時のフォールバック: MD5 CDN URL（直接 URL でリダイレクトなし）
+    # SVG の場合は .png サムネイルが必要
     encoded = urllib.parse.quote(name, safe="")
-    return f"https://commons.wikimedia.org/wiki/Special:FilePath/{encoded}?width={width}"
+    md5  = hashlib.md5(name.encode("utf-8")).hexdigest()
+    a, ab = md5[0], md5[0:2]
+    ext  = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext in ("svg", "tif", "tiff", "webp"):
+        # ラスタライズ済み PNG サムネイル
+        return (f"https://upload.wikimedia.org/wikipedia/commons/thumb"
+                f"/{a}/{ab}/{encoded}/{width}px-{encoded}.png")
+    return (f"https://upload.wikimedia.org/wikipedia/commons/thumb"
+            f"/{a}/{ab}/{encoded}/{width}px-{encoded}")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -790,7 +802,3 @@ SELECT ?child ?childLabel ?name ?rank WHERE {
         print(f"   [{h['qid']:12s}] {h['label']:<25}  {h['desc'][:50]}")
 
     print("\n✅  診断完了 — python taxa_tree.py --qid Q25341 --fast で実行できます")
-
-# ─────────────────────────────────────────────────────────────────
-#  HTML テンプレート
-# ─────────────────────────────────────────────────────────────────

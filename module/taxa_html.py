@@ -195,7 +195,7 @@ svg{width:100%;height:100%}
       onclick="tt.style.display='none'">
       <span style="font-size:18px;line-height:1;color:var(--txt3)">✕</span>
     </div>
-    <img id="tt-img" src="" alt=""
+    <img id="tt-img" src="" alt="" crossorigin="anonymous"
          onerror="this.classList.add('hidden');document.getElementById('tt-ph').classList.remove('hidden')">
     <div id="tt-ph" class="hidden">🌿</div>
     <div id="tt-body">
@@ -483,6 +483,7 @@ function update(src) {
     const cid = ensureClip(d.data.id);
     sel.append("image").attr("class","species-img")
       .attr("href", d.data.image_url)
+      .attr("crossOrigin", "anonymous")
       .attr("x", -IMG_R).attr("y", -IMG_R)
       .attr("width", IMG_R*2).attr("height", IMG_R*2)
       .attr("clip-path", `url(#${cid})`)
