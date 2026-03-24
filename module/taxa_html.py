@@ -14,6 +14,10 @@ module/taxa_html.py  ─  HTML生成・UI モジュール
 import json
 from datetime import datetime
 
+# HTML・UI モジュールのバージョン
+# テンプレート・CSS・JS など UI に変更があるたびにインクリメントする
+HTML_VERSION = "1.2"
+
 HTML = r"""<!DOCTYPE html>
 <html lang="ja" data-theme="dark"><head>
 <meta charset="UTF-8">

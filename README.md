@@ -55,9 +55,9 @@ Wikidata SPARQL API から任意の分類群を BFS（幅優先探索）で取�
 
 | ファイル | 行数 | 責務 |
 |---|---|---|
-| `taxa_tree.py` | 281行 | 引数解析・モード切替・キャッシュ管理・HTML保存 |
-| `module/taxa_fetch.py` | 797行 | SPARQL・BFS・画像URL解決・進捗バー・接続診断 |
-| `module/taxa_html.py` | 1,020行 | HTML テンプレート・`make_html()` |
+| `taxa_tree.py` | 309行 | 引数解析・モード切替・キャッシュ管理・HTML保存 |
+| `module/taxa_fetch.py` | 816行 | SPARQL・BFS・画像URL解決・進捗バー・接続診断 |
+| `module/taxa_html.py` | 1,025行 | HTML テンプレート・`make_html()` |
 | `module/__init__.py` | 1行 | パッケージ宣言 |
 
 **UI を変更する場合は `module/taxa_html.py` のみを編集すればよく、`module/taxa_fetch.py` のレビューは不要です。**
@@ -223,7 +223,7 @@ Settings → Pages → Source を **「GitHub Actions」** に設定。
 
 ## コード構成
 
-### taxa_tree.py（281行） ─ エントリポイント
+### taxa_tree.py（309行） ─ エントリポイント
 
 ```
 taxa_tree.py
@@ -243,6 +243,7 @@ taxa_tree.py
 │   └── make_index_html() → result/index.html を自動更新（系統図一覧ページ）
 │
 └── main()
+    ├── バナー表示（fetch: v{FETCH_VERSION}  │  html: v{HTML_VERSION}）  ★ v5追加
     ├── --test     → run_test() して終了
     ├── --render   → _load_cache() → _save_html() して終了  ★ v5追加
     ├── --cached   → --render の後方互換エイリアス
@@ -258,7 +259,7 @@ taxa_tree.py
 
 ---
 
-### module/taxa_fetch.py（797行） ─ データ取得・モデル構築
+### module/taxa_fetch.py（816行） ─ データ取得・モデル構築
 
 ```
 taxa_fetch.py
@@ -299,7 +300,7 @@ taxa_fetch.py
 
 ---
 
-### module/taxa_html.py（1,020行） ─ HTML 生成・UI
+### module/taxa_html.py（1,025行） ─ HTML 生成・UI
 
 ```
 taxa_html.py
@@ -335,7 +336,7 @@ taxa_html.py
 
 ### v5.0（現バージョン / ベースライン）
 
-**確定日: 2026-03 / 合計 2,098行（taxa_tree: 281 / taxa_fetch: 797 / taxa_html: 1,020）**
+**確定日: 2026-03 / 合計 2,150行（taxa_tree: 309 / taxa_fetch: 816 / taxa_html: 1,025）**
 
 | 変更 | 内容 |
 |---|---|
@@ -343,6 +344,8 @@ taxa_html.py
 | **`--render` フラグ** | fetch をスキップして HTML のみ再生成するモードを追加。`--qid` で対象キャッシュを指定可 |
 | **`_load_cache()` / `_save_html()`** | HTML再生成ロジックを独立関数として切り出し。`main()` の可読性を改善 |
 | **`make_index_html()`** | `result/` 内の系統図一覧をランディングページ（`index.html`）として自動生成。HTML 生成のたびに自動更新 |
+| **プログレスバー改善** | バーの分母を種数（推定値）から科数（確定値）に変更。取得中の進捗が正確に表示される |
+| **モジュールバージョン表示** | 起動バナーに `fetch: v{FETCH_VERSION}  │  html: v{HTML_VERSION}` を追加。`FETCH_VERSION`（taxa_fetch.py）・`HTML_VERSION`（taxa_html.py）定数で管理 |
 | **検索の全ノード走査** | `walkAll()` を追加。折りたたみ状態でも全ノードを検索可能に。ヒット時に自動展開・自動フィット |
 | **画像 URL の API 対応** | `resolve_image_url()` を新設。Wikimedia Thumbnail API で CDN URL を直接取得し、SVG 等の表示問題を解消 |
 

@@ -19,6 +19,7 @@ Wikidata SPARQL から任意の分類群を BFS で取得し、
     _walk(node, fn)            ツリー全走査
     RANK_ORD                   ランク順リスト
     DEFAULT_SPLIT              デフォルト分割ランク
+    FETCH_VERSION              フェッチモジュールのバージョン文字列
     _elapsed()                 経過時間文字列
 """
 import ctypes
@@ -55,6 +56,10 @@ HEADERS  = {
     "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
     "Accept":     "application/sparql-results+json",
 }
+
+# フェッチモジュールのバージョン
+# SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
+FETCH_VERSION = "1.2"
 
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
@@ -720,16 +725,18 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
     total_p = len(split_nodes)
     done_p  = 0
     done_sp = 0
-    unit    = "種" if stop_rank == "species" else "件"
+    unit_sp = "種" if stop_rank == "species" else "件"
 
-    pprint(f"\n  📋 Phase 2: {total_p}ノード の子孫を取得します"
-           f"  （{split_rank} → {stop_rank}）")
+    pprint(f"\n  📋 Phase 2: {total_p} {split_rank} の子孫を取得します"
+           f"  （→ {stop_rank}）")
     if total_sp > 0:
-        pprint(f"  📊 推定総種数: ~{total_sp:,}種\n")
+        pprint(f"  📊 参考: 推定総種数 ~{total_sp:,}種  ※バーは科の進捗を表示\n")
 
     for nd in split_nodes:
-        bar_update(done_sp, total_sp, done_p, total_p,
-                   f"{nd['name']} [{nd['id']}] 取得開始…", unit)
+        # バーの分母・分子を科数(done_p/total_p)に統一
+        # 科数ベースのため予測誤差が大きい種数より正確
+        bar_update(done_p, total_p, done_p, total_p,
+                   f"{nd['name']} [{nd['id']}] 取得開始…", split_rank)
 
         n = _bfs_subtree(nd, nodes_dict, stop_rank)
         done_p  += 1
@@ -738,12 +745,12 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
         pprint(
             f"  ✓  [{nd['id']}] {nd['name']}"
             + (f" / {nd['ja']}" if nd.get("ja") else "")
-            + f"  {n:,}{unit}  ({_elapsed()})"
+            + f"  {n:,}{unit_sp}  ({_elapsed()})"
         )
-        bar_update(done_sp, total_sp, done_p, total_p, nd["name"], unit)
+        bar_update(done_p, total_p, done_p, total_p, nd["name"], split_rank)
 
     bar_done()
-    pprint(f"\n  📊 Phase 2 完了: {done_sp:,}{unit} / {done_p}ノード  ({_elapsed()})")
+    pprint(f"\n  📊 Phase 2 完了: {done_sp:,}{unit_sp} / {done_p}{split_rank}  ({_elapsed()})")
     _sort_children(root_node)
 
 # ─────────────────────────────────────────────────────────────────

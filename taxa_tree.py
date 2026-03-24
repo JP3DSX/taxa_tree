@@ -36,6 +36,7 @@ from pathlib import Path
 
 from module.taxa_fetch import (
     DEFAULT_SPLIT,
+    FETCH_VERSION,
     RANK_ORD,
     _elapsed,
     _walk,
@@ -49,7 +50,7 @@ from module.taxa_fetch import (
     run_test,
     sanitize_filename,
 )
-from module.taxa_html import make_html, make_index_html
+from module.taxa_html import HTML_VERSION, make_html, make_index_html
 
 # ─────────────────────────────────────────────────────────────────
 #  設定
@@ -63,6 +64,20 @@ OUTPUT_DIR = "result"
 # ─────────────────────────────────────────────────────────────────
 #  メイン
 # ─────────────────────────────────────────────────────────────────
+
+def _print_meta(tree: dict) -> None:
+    """キャッシュの _meta 情報をコンソールに表示する。"""
+    meta = tree.get("_meta")
+    if meta:
+        fv = meta.get("fetch_version", "?")
+        fa = meta.get("fetched_at",    "?")
+        sr = meta.get("split_rank",    "?")
+        st = meta.get("stop_rank",     "?")
+        print(f"   fetch_version: {fv}  |  取得日時: {fa}")
+        print(f"   split_rank: {sr}  |  stop_rank: {st}")
+    else:
+        print("   ⚠  _meta なし（旧バージョンのキャッシュ）")
+
 
 def _load_cache(qid: str | None) -> tuple[dict, Path]:
     """
@@ -82,7 +97,9 @@ def _load_cache(qid: str | None) -> tuple[dict, Path]:
             if p.exists():
                 print(f"\n📂 キャッシュ読み込み: {p}  (QID: {qid})")
                 with open(p, encoding="utf-8") as f:
-                    return json.load(f), p
+                    data = json.load(f)
+                _print_meta(data)
+                return data, p
         print(f"❌  QID {qid} のキャッシュが見つかりません。")
         print(f"   先に python taxa_tree.py --qid {qid} で取得してください。")
         sys.exit(1)
@@ -105,7 +122,9 @@ def _load_cache(qid: str | None) -> tuple[dict, Path]:
         p = caches[0]
         print(f"\n📂 キャッシュ読み込み（最新）: {p}")
         with open(p, encoding="utf-8") as f:
-            return json.load(f), p
+            data = json.load(f)
+        _print_meta(data)
+        return data, p
 
 
 def _save_html(tree: dict, output_arg: str | None) -> None:
@@ -177,6 +196,7 @@ def main() -> None:
     print("\n╔═══════════════════════════════════════════════╗")
     print("║  🌿  生物分類 汎用系統図ジェネレーター  v5   ║")
     print("╚═══════════════════════════════════════════════╝")
+    print(f"   fetch: v{FETCH_VERSION}  │  html: v{HTML_VERSION}")
 
     # ── 接続診断 ─────────────────────────────────────────────────
     if args.test:
@@ -261,6 +281,14 @@ def main() -> None:
         print("  （--fast: Phase 2 をスキップ）")
 
     # ── キャッシュ保存 ─────────────────────────────────────────
+    # _meta: キャッシュを生成したモジュールのバージョン・日時を記録
+    from datetime import datetime as _dt
+    tree["_meta"] = {
+        "fetch_version": FETCH_VERSION,
+        "fetched_at":    _dt.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "split_rank":    split_rank,
+        "stop_rank":     stop_rank,
+    }
     cache_file.parent.mkdir(parents=True, exist_ok=True)
     with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(tree, f, ensure_ascii=False)
