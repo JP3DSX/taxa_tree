@@ -580,28 +580,66 @@ const cntSp = d => {
 };
 
 // ─── 検索 ─────────────────────────────────────────────────────────
+// _children を含むツリー全ノードを走査するヘルパー
+function walkAll(node, fn) {
+  fn(node);
+  const kids = node.children || node._children || [];
+  kids.forEach(c => walkAll(c, fn));
+}
+
 function doSrch(q) {
   const v = q.trim().toLowerCase();
+  // ハイライトをリセット
   g.selectAll(".nd").classed("nh", false).classed("nm", false);
-  if (!v) return;
-  const hit = new Set();
-  root.descendants().forEach(d => {
-    if ((d.data.name||"").toLowerCase().includes(v) ||
-        (d.data.ja  ||"").toLowerCase().includes(v)) {
+  if (!v) {
+    // 空文字ならリセットのみ
+    update(root);
+    return;
+  }
+
+  const hit      = new Set(); // ヒットノードおよびその祖先
+  const hitDirect = new Set(); // ヒットしたノード自身
+
+  // _children を含む全ノードを走査
+  walkAll(root, d => {
+    const name = (d.data.name || "").toLowerCase();
+    const ja   = (d.data.ja   || "").toLowerCase();
+    if (name.includes(v) || ja.includes(v)) {
+      hitDirect.add(d.data.id);
       hit.add(d.data.id);
+      // 祖先パスをすべて展開してマーク
       let p = d.parent;
       while (p) {
         hit.add(p.data.id);
-        if (p._children) { p.children = p._children; p._children = null; }
+        // 折りたたまれていたら展開
+        if (p._children) {
+          p.children  = p._children;
+          p._children = null;
+        }
         p = p.parent;
       }
     }
   });
-  if (hit.size) update(root);
+
+  // ヒットしたノードの子孫も展開（ヒットノード自体の下も見せる）
+  walkAll(root, d => {
+    if (hitDirect.has(d.data.id) && d._children) {
+      d.children  = d._children;
+      d._children = null;
+    }
+  });
+
+  // ツリーを再描画してハイライトを適用
+  update(root);
+
   g.selectAll(".nd")
-    .classed("nh", d => (d.data.name||"").toLowerCase().includes(v) ||
-                        (d.data.ja  ||"").toLowerCase().includes(v))
+    .classed("nh", d => hitDirect.has(d.data.id))
     .classed("nm", d => !hit.has(d.data.id));
+
+  // ヒットノードが画面内に入るよう自動フィット
+  if (hit.size > 0) {
+    setTimeout(() => fitV(false), 260);
+  }
 }
 
 // ─── デバイス判定 ───────────────────────────────────────────────
@@ -705,7 +743,10 @@ function showTT(e, d) {
   if (d.data.image_url) {
     // サムネイルURLの解像度を220pxに差し替え
     // Special:FilePath?width= 方式: width値を220に差し替え
-    const large = d.data.image_url.replace(/[?&]width=\d+/, '?width=220');
+    // Wikimedia API URL の w= パラメータと Special:FilePath の width= 両方に対応
+    const large = d.data.image_url
+      .replace(/\/\d+px-/, '/220px-')           // CDN thumb URL
+      .replace(/[?&]width=\d+/, '?width=220');  // Special:FilePath URL
     imgEl.src = large;
     imgEl.classList.remove("hidden");
     phEl.classList.add("hidden");
