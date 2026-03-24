@@ -53,7 +53,7 @@ except Exception:
 
 ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS  = {
-    "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
+    "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
     "Accept":     "application/sparql-results+json",
 }
 
@@ -185,18 +185,23 @@ def _elapsed():
     return f"{s//60:02d}:{s%60:02d}"
 
 _bar = {"done": 0, "total": 0, "done_p": 0, "total_p": 0,
+        "done_sp": 0, "total_sp": 0,
         "cur": "", "active": False, "unit": "種"}
 
 def _bar_line():
     b = _bar
     cols   = shutil.get_terminal_size((100, 24)).columns
-    pct    = b["done"] / b["total"] if b["total"] > 0 else 0
-    bw     = max(10, min(35, cols - 60))
+    # バー・% は科数ベース（確定値）
+    pct    = b["done_p"] / b["total_p"] if b["total_p"] > 0 else 0
+    bw     = max(10, min(30, cols - 70))
     filled = int(bw * pct)
     bar    = "█" * filled + "░" * (bw - filled)
-    tot_s  = f"~{b['total']:,}" if b["total"] > 0 else "?"
-    line   = (f"  [{bar}] {b['done']:,}/{tot_s}{b['unit']}  "
-              f"P:{b['done_p']}/{b['total_p']}  {pct*100:.1f}%  {_elapsed()}")
+    # 科数表示
+    fam_s  = f"{b['done_p']}/{b['total_p']}科"
+    # 種数表示（参考値）
+    sp_tot = f"~{b['total_sp']:,}" if b["total_sp"] > 0 else "?"
+    sp_s   = f"  {b['done_sp']:,}/{sp_tot}種" if b["total_sp"] > 0 or b["done_sp"] > 0 else ""
+    line   = (f"  [{bar}] {fam_s}{sp_s}  {pct*100:.1f}%  {_elapsed()}")
     if b["cur"]:
         avail = cols - len(line) - 5
         if avail > 4:
@@ -208,8 +213,13 @@ def _redraw():
         sys.stdout.write(f"\r\033[K{_bar_line()}")
         sys.stdout.flush()
 
-def bar_update(done, total, done_p, total_p, cur="", unit="種"):
-    _bar.update(done=done, total=total, done_p=done_p, total_p=total_p,
+def bar_update(done_p, total_p, done_sp=0, total_sp=0, cur="", unit="種"):
+    """バー状態を更新して再描画する。
+    バーの塗り・% は科数（done_p/total_p）、種数は参考表示（done_sp/total_sp）。
+    """
+    _bar.update(done_p=done_p, total_p=total_p,
+                done_sp=done_sp, total_sp=total_sp,
+                done=done_p, total=total_p,
                 cur=cur, unit=unit, active=True)
     _redraw()
 
@@ -733,10 +743,8 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
         pprint(f"  📊 参考: 推定総種数 ~{total_sp:,}種  ※バーは科の進捗を表示\n")
 
     for nd in split_nodes:
-        # バーの分母・分子を科数(done_p/total_p)に統一
-        # 科数ベースのため予測誤差が大きい種数より正確
-        bar_update(done_p, total_p, done_p, total_p,
-                   f"{nd['name']} [{nd['id']}] 取得開始…", split_rank)
+        bar_update(done_p, total_p, done_sp, total_sp,
+                   f"{nd['name']} [{nd['id']}] 取得開始…")
 
         n = _bfs_subtree(nd, nodes_dict, stop_rank)
         done_p  += 1
@@ -747,7 +755,7 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
             + (f" / {nd['ja']}" if nd.get("ja") else "")
             + f"  {n:,}{unit_sp}  ({_elapsed()})"
         )
-        bar_update(done_p, total_p, done_p, total_p, nd["name"], split_rank)
+        bar_update(done_p, total_p, done_sp, total_sp, nd["name"])
 
     bar_done()
     pprint(f"\n  📊 Phase 2 完了: {done_sp:,}{unit_sp} / {done_p}{split_rank}  ({_elapsed()})")
