@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-taxa_tree.py  ─  生物分類 汎用系統図ジェネレーター v2
+taxa_tree.py  ─  生物分類 汎用系統図ジェネレーター v3
 ====================================================================
 Wikidata SPARQL から任意の分類群を BFS で取得し、
 単体配布可能なインタラクティブ HTML 系統図を生成します。
@@ -37,21 +37,24 @@ Wikidata SPARQL から任意の分類群を BFS で取得し、
 """
 
 import argparse
+import ctypes
 import json
-import sys
-import time
 import os
 import re
 import shutil
-import ctypes
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from collections import deque
+import hashlib
+import urllib.parse
 
 try:
     import requests
 except ImportError:
-    print("❌  pip install requests"); sys.exit(1)
+    print("❌  pip install requests")
+    sys.exit(1)
 
 try:
     import urllib3
@@ -65,7 +68,7 @@ except Exception:
 
 ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS  = {
-    "User-Agent": "TaxaTreeBot/1.0 (jp3dsx@gmail.com)",
+    "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
     "Accept":     "application/sparql-results+json",
 }
 
@@ -133,6 +136,9 @@ RANK_MAP = {
 
 # 「以下の子を取得する」Phase 1 のデフォルト打ち切りランク
 DEFAULT_SPLIT = "family"
+
+# 出力先ディレクトリ（キャッシュ JSON と HTML の両方をここに保存する）
+OUTPUT_DIR = "result"
 
 # ─────────────────────────────────────────────────────────────────
 #  ランクユーティリティ
@@ -507,7 +513,6 @@ def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
         # または単純に "File:Xxx.jpg" 形式で返ることがある
         if "Special:FilePath/" in img_val:
             filename = img_val.split("Special:FilePath/")[-1]
-            import urllib.parse
             filename = urllib.parse.unquote(filename)
             image_url = commons_thumb_url(filename, width=120)
         elif img_val.startswith("File:") or img_val.startswith("file:"):
@@ -538,8 +543,6 @@ def commons_thumb_url(filename: str, width: int = 120) -> str:
     ここでは API 経由でサムネイル URL を取得するのではなく、
     commons の URL 規則を直接構築する（実績のある方式）。
     """
-    import hashlib
-    import urllib.parse
     # "File:" プレフィックスを除去し、スペースを _ に統一
     name = filename
     if name.startswith("File:") or name.startswith("file:"):
@@ -1378,7 +1381,7 @@ def main():
     _t0 = time.time()
 
     ap = argparse.ArgumentParser(
-        description="生物分類 汎用系統図ジェネレーター v2",
+        description="生物分類 汎用系統図ジェネレーター v3",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -1404,7 +1407,7 @@ def main():
     args = ap.parse_args()
 
     print("\n╔═══════════════════════════════════════════════╗")
-    print("║  🌿  生物分類 汎用系統図ジェネレーター  v2   ║")
+    print("║  🌿  生物分類 汎用系統図ジェネレーター  v3   ║")
     print("╚═══════════════════════════════════════════════╝")
 
     if args.test:
@@ -1423,13 +1426,20 @@ def main():
 
     # キャッシュ再利用モード: QID 不要
     if args.cached:
-        cache_path = Path(args.output) if args.output else None
         # 直近のキャッシュ（taxa_cache_*.json）を探す
-        caches = sorted(Path(".").glob("taxa_cache_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not caches and not Path("taxa_cache.json").exists():
+        # OUTPUT_DIR 内を優先し、なければカレントも検索
+        caches = sorted(
+            list(Path(OUTPUT_DIR).glob("taxa_cache_*.json"))
+            + list(Path(".").glob("taxa_cache_*.json")),
+            key=lambda p: p.stat().st_mtime, reverse=True
+        ) if Path(OUTPUT_DIR).exists() else sorted(
+            Path(".").glob("taxa_cache_*.json"),
+            key=lambda p: p.stat().st_mtime, reverse=True
+        )
+        if not caches:
             print("❌  キャッシュが見つかりません。まず --qid または --taxon で取得してください。")
             sys.exit(1)
-        cache_file = caches[0] if caches else Path("taxa_cache.json")
+        cache_file = caches[0]
         print(f"\n📂 キャッシュ読み込み: {cache_file}")
         with open(cache_file, encoding="utf-8") as f:
             tree = json.load(f)
@@ -1442,7 +1452,7 @@ def main():
             root_qid = args.qid.strip()
 
         # キャッシュファイル名（QID 込み）
-        cache_file = Path(f"taxa_cache_{root_qid}.json")
+        cache_file = Path(OUTPUT_DIR) / f"taxa_cache_{root_qid}.json"
 
         # ── ルート情報取得 ─────────────────────────────────────
         print(f"\n  🌱 ルート情報を取得中 [{root_qid}]…")
@@ -1487,6 +1497,7 @@ def main():
             print("  （--fast: Phase 2 をスキップ）")
 
         # ── キャッシュ保存 ────────────────────────────────────────
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump(tree, f, ensure_ascii=False)
 
@@ -1509,8 +1520,10 @@ def main():
         label = sanitize_filename(
             tree.get("ja") or tree.get("name") or tree["id"]
         )
-        out = Path(f"taxa_{label}_{tree['id']}.html")
+        out = Path(OUTPUT_DIR) / f"taxa_{label}_{tree['id']}.html"
 
+    # 出力先ディレクトリが存在しない場合は自動作成
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
     mb = out.stat().st_size / 1024 / 1024
     print(f"\n✅  完了!  →  {out}  ({mb:.1f} MB)  総時間: {_elapsed()}")
