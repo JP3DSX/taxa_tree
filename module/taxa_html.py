@@ -111,11 +111,10 @@ svg{width:100%;height:100%}
 #tt-ph{width:100%;aspect-ratio:16/10;display:flex;align-items:center;
   justify-content:center;font-size:30px;background:var(--bg3)}
 #tt-ph.hidden{display:none}
-/* サイズスライダー */
-#tt-sizer{width:100%;display:flex;align-items:center;gap:6px;
-  padding:6px 12px 8px;border-top:1px solid var(--brd)}
-#tt-sizer label{font-size:9px;color:var(--txt3);white-space:nowrap}
-#tt-sizer input[type=range]{flex:1;height:3px;accent-color:var(--hl);
+/* サイズスライダー（凡例バー内） */
+#leg-sizer{display:flex;align-items:center;gap:5px;margin-left:auto}
+#leg-sizer label{font-size:9px;color:var(--txt3);white-space:nowrap}
+#leg-sizer input[type=range]{width:80px;height:3px;accent-color:var(--hl);
   cursor:pointer}
 #tt-body{padding:9px 12px}
 #tt-rank{font-size:10px;color:var(--txt3)}
@@ -225,6 +224,12 @@ svg{width:100%;height:100%}
   <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>
   <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亜種</div>
   <span id="leg-hint" style="margin-left:7px">▶クリックで展開 ／ ドラッグ・ホイールでナビ</span>
+  <div id="leg-sizer">
+    <label>↔ TT</label>
+    <input type="range" id="tt-size-slider"
+      min="180" max="420" step="10" value="280"
+      oninput="setTTWidth(+this.value)">
+  </div>
 </div>
 <div id="main">
   <svg id="tree"></svg>
@@ -254,12 +259,6 @@ svg{width:100%;height:100%}
           onclick="openWiki(currentTTNode)">
         </button>
       </div>
-    </div>
-    <div id="tt-sizer">
-      <label>↔</label>
-      <input type="range" id="tt-size-slider"
-        min="180" max="420" step="10" value="280"
-        oninput="setTTWidth(+this.value)">
     </div>
   </div>
   <div id="foot">QID: __QID__ &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: __DATE__</div>
@@ -880,8 +879,8 @@ function setTTWidth(w) {
 })();
 
 function schedulHide() {
-  // 600ms 猶予: ノードからツールチップへの移動中に消えないよう延長
-  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 600);
+  // 300ms 猶予: ノードからツールチップへの移動中に消えないよう確保
+  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 300);
 }
 function cancelHide() {
   if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
@@ -895,7 +894,7 @@ tt.addEventListener("mouseleave", schedulHide);
 mainEl.addEventListener("mousemove", (e) => {
   if (tt.style.display === "none" || !_hideTimer) return;
   const tr = tt.getBoundingClientRect();
-  const margin = 24;
+  const margin = 10;
   if (e.clientX >= tr.left - margin && e.clientX <= tr.right  + margin &&
       e.clientY >= tr.top  - margin && e.clientY <= tr.bottom + margin) {
     cancelHide();
