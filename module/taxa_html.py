@@ -534,8 +534,8 @@ function update(src) {
     .attr("transform", _ => `translate(${layoutMode==="lr"?src.y:src.x},${layoutMode==="lr"?src.x:src.y})`)
     .style("opacity", 0).remove();
   root.descendants().forEach(d => { d.x0 = d.x; d.y0 = d.y; });
-  // 再描画後に可視範囲内の画像をロード
-  setTimeout(loadVisibleImages, 250);
+  // 再描画後: デバウンスタイマー経由で画像ロードをスケジュール
+  scheduleImageLoad();
 }
 
 // ─── レイアウト補助 ───────────────────────────────────────────────
@@ -666,35 +666,94 @@ function doSrch(q) {
   }
 }
 
-// ─── 画像レイジーロード ───────────────────────────────────────────
-// SVG <image> 要素は IntersectionObserver の対象外のため
-// D3 の zoom イベントと update 後に可視判定して順次ロードする
-function loadVisibleImages() {
+// ─── 画像レイジーロード（ズーム閾値 + デバウンス + レートキュー）─────
+//
+// 3段構えで Wikimedia CDN への 429 を防ぐ
+//
+//  段1: ズーム閾値
+//       scale < IMG_ZOOM_MIN の場合はリクエストしない
+//       （全体俯瞰中にノードが小さすぎる→画像不要）
+//
+//  段2: デバウンス
+//       ズーム倍率が変わってから IMG_DEBOUNCE_MS ms 後に処理開始
+//       ドラッグ・ピンチ操作中は何もしない
+//
+//  段3: レートリミットキュー
+//       IMG_RATE_PER_SEC リクエスト/秒 に上限を設ける
+//       キューに積んで順次送出
+
+const IMG_ZOOM_MIN    = 0.35;   // この倍率未満では画像ロードしない
+const IMG_DEBOUNCE_MS = 1500;   // ズーム操作停止後に待つ時間(ms)
+const IMG_RATE_PER_SEC = 4;     // 1秒あたりの最大リクエスト数
+
+// ── キュー本体 ────────────────────────────────────────────────────
+const _imgQueue   = [];         // 未ロード URL のキュー [{el, src}]
+let   _queueTimer = null;       // キュー処理のインターバルタイマー
+
+function _startQueue() {
+  if (_queueTimer) return;
+  _queueTimer = setInterval(() => {
+    if (_imgQueue.length === 0) {
+      clearInterval(_queueTimer);
+      _queueTimer = null;
+      return;
+    }
+    // 1 tick に IMG_RATE_PER_SEC 件まで送出
+    const batch = _imgQueue.splice(0, IMG_RATE_PER_SEC);
+    batch.forEach(({el, src}) => {
+      if (!el.attr("href")) el.attr("href", src);
+    });
+  }, 1000);
+}
+
+function _enqueueVisible() {
+  const t       = d3.zoomTransform(svg.node());
+  const scale   = t.k;
   const svgRect = mainEl.getBoundingClientRect();
-  // 現在の transform を取得して SVG 座標→画面座標に変換
-  const t = d3.zoomTransform(svg.node());
+
+  // 段1: ズーム閾値チェック
+  if (scale < IMG_ZOOM_MIN) return;
+
   g.selectAll("image.species-img").each(function() {
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    if (!src || el.attr("href")) return; // 読込済みまたはURLなし
-    // ノードのSVG座標を画面座標に変換
+    if (!src || el.attr("href")) return; // ロード済み or URL なし
+    // 既にキューに入っているか確認
+    if (_imgQueue.some(q => q.src === src)) return;
+
+    // ノード座標 → 画面座標に変換
     const parent = this.parentNode;
     if (!parent) return;
     const nd = d3.select(parent).datum();
     if (!nd) return;
     const sx = layoutMode === "lr" ? nd.y : nd.x;
     const sy = layoutMode === "lr" ? nd.x : nd.y;
-    const [px, py] = [t.applyX(sx), t.applyY(sy)];
-    // 画面内 ± マージン で判定
-    const margin = 200;
+    const px = t.applyX(sx);
+    const py = t.applyY(sy);
+
+    // 画面内（マージン付き）のノードをキューに追加
+    const margin = 100;
     if (px > -margin && px < svgRect.width  + margin &&
         py > -margin && py < svgRect.height + margin) {
-      el.attr("href", src); // ロード開始
+      _imgQueue.push({el, src});
     }
   });
+
+  _startQueue();
 }
-// zoom 終了時と update 後に可視画像をロード
-zm.on("end.lazyimg", loadVisibleImages);
+
+// ── デバウンスラッパー ────────────────────────────────────────────
+let _imgDebounce = null;
+
+function scheduleImageLoad() {
+  clearTimeout(_imgDebounce);
+  _imgDebounce = setTimeout(_enqueueVisible, IMG_DEBOUNCE_MS);
+}
+
+// zoom 変化時: デバウンスタイマーをリセット
+zm.on("zoom.lazyimg",  () => clearTimeout(_imgDebounce));
+// zoom 終了時: デバウンス開始
+zm.on("end.lazyimg",   scheduleImageLoad);
 
 // ─── デバイス判定 ───────────────────────────────────────────────
 const isTouchDev = window.matchMedia('(pointer: coarse)').matches;
