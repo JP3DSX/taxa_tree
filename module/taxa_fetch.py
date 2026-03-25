@@ -59,7 +59,7 @@ HEADERS  = {
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "1.3"
+FETCH_VERSION = "1.4"
 
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
@@ -541,57 +541,30 @@ def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
 
 def resolve_image_url(filename: str, width: int = 120) -> str:
     """
-    Wikimedia Thumbnail API でファイル名から直接の CDN URL を取得する。
-    Special:FilePath はリダイレクトのため SVG <image> で動作しない場合があり、
-    API で thumb URL を直接取得することで確実に表示できる。
+    Wikimedia Commons のファイル名から CDN サムネイル URL を生成する。
 
-    API: https://commons.wikimedia.org/w/api.php
-         action=query & titles=File:xxx & prop=imageinfo & iiprop=url
-         & iiurlwidth=120
+    HTTP リクエストは一切行わず、MD5 ハッシュから CDN パスを直接計算する。
+    ・標準サムネイルサイズ（20/40/60/120/250/330/500px 等）を使うこと
+    ・SVG/TIF/WEBP は末尾に .png を付けてラスタライズ版を要求する
     """
     if not filename:
         return ""
-    # "File:" プレフィックスを正規化
+    # "File:" プレフィックスを除去してスペースを _ に統一
     name = filename
     if name.lower().startswith("file:"):
         name = name[5:]
     name = name.replace(" ", "_")
-    title = f"File:{name}"
-    try:
-        r = get_session().get(
-            "https://commons.wikimedia.org/w/api.php",
-            params={
-                "action":    "query",
-                "titles":    title,
-                "prop":      "imageinfo",
-                "iiprop":    "url",
-                "iiurlwidth": str(width),
-                "format":    "json",
-            },
-            headers={
-                "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
-            },
-            timeout=15,
-        )
-        pages = r.json().get("query", {}).get("pages", {})
-        for page in pages.values():
-            ii = page.get("imageinfo", [])
-            if ii and ii[0].get("thumburl"):
-                return ii[0]["thumburl"]
-    except Exception:
-        pass
-    # API 失敗時のフォールバック: MD5 CDN URL（直接 URL でリダイレクトなし）
-    # SVG の場合は .png サムネイルが必要
+
     encoded = urllib.parse.quote(name, safe="")
-    md5  = hashlib.md5(name.encode("utf-8")).hexdigest()
-    a, ab = md5[0], md5[0:2]
-    ext  = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    md5     = hashlib.md5(name.encode("utf-8")).hexdigest()
+    a, ab   = md5[0], md5[0:2]
+    ext     = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    base    = (f"https://upload.wikimedia.org/wikipedia/commons/thumb"
+               f"/{a}/{ab}/{encoded}/{width}px-{encoded}")
+    # SVG・TIF・WEBP はラスタライズ済み PNG サムネイルを要求
     if ext in ("svg", "tif", "tiff", "webp"):
-        # ラスタライズ済み PNG サムネイル
-        return (f"https://upload.wikimedia.org/wikipedia/commons/thumb"
-                f"/{a}/{ab}/{encoded}/{width}px-{encoded}.png")
-    return (f"https://upload.wikimedia.org/wikipedia/commons/thumb"
-            f"/{a}/{ab}/{encoded}/{width}px-{encoded}")
+        return base + ".png"
+    return base
 
 
 # ─────────────────────────────────────────────────────────────────

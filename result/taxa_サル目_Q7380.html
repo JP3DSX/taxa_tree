@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>サル目 (Primates) 系統図</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
+  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;
+  --brd:#30363d;--hl:#f0b429;--foot-bg:rgba(13,17,23,.88);
+  --c-domain:#f472b6;--c-kingdom:#e879f9;--c-phylum:#c084fc;
+  --c-class:#a78bfa;--c-order:#818cf8;--c-suborder:#34d399;
+  --c-infraorder:#fb923c;--c-superfamily:#f87171;--c-family:#60a5fa;
+  --c-subfamily:#38bdf8;--c-tribe:#4ade80;--c-genus:#a78bfa;
+  --c-species:#86efac;--c-subspecies:#6ee7b7;--c-variety:#d9f99d;
+  --c-unknown:#6b7280;
+}
+[data-theme="light"]{
+  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;
+  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
+  --brd:#d0d7de;--hl:#b45309;--foot-bg:rgba(246,248,250,.92);
+  --c-domain:#9d174d;--c-kingdom:#86198f;--c-phylum:#7e22ce;
+  --c-class:#6d28d9;--c-order:#4338ca;--c-suborder:#065f46;
+  --c-infraorder:#9a3412;--c-superfamily:#991b1b;--c-family:#1d4ed8;
+  --c-subfamily:#0369a1;--c-tribe:#166534;--c-genus:#6d28d9;
+  --c-species:#15803d;--c-subspecies:#047857;--c-variety:#3f6212;
+  --c-unknown:#374151;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
+  touch-action:manipulation;
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
+  transition:background .2s,color .2s}
+#hdr{display:flex;align-items:center;gap:6px;padding:6px 10px;
+  background:var(--bg2);border-bottom:1px solid var(--brd);flex-wrap:wrap}
+#ttl{font-size:13px;font-weight:600;white-space:nowrap}
+#ttl em{font-style:italic;color:var(--txt2);font-size:11px;font-weight:400;margin-left:4px}
+#srch{background:var(--bg3);border:1px solid var(--brd);color:var(--txt);
+  border-radius:18px;padding:4px 11px;font-size:11px;width:140px;outline:none;
+  transition:background .2s,border-color .15s}
+#srch:focus{border-color:var(--hl)}#srch::placeholder{color:var(--txt3)}
+.hb,.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:3px 9px;font-size:11px;cursor:pointer;
+  white-space:nowrap;transition:border-color .15s,color .15s,background .15s}
+.hb:hover,.tb:hover{border-color:var(--txt2);color:var(--txt)}
+.tb.active{border-color:var(--hl);color:var(--hl);background:rgba(240,180,41,.08)}
+.ctrl{display:flex;gap:4px;padding-left:7px;border-left:1px solid var(--brd)}
+#stat{font-size:11px;color:var(--txt3);margin-left:auto;white-space:nowrap;display:flex;gap:9px}
+.sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:2px}
+#leg{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:3px 10px;
+  background:var(--bg2);border-bottom:1px solid var(--brd);font-size:10px;color:var(--txt3)}
+.li{display:flex;align-items:center;gap:3px}
+.ld{width:7px;height:7px;border-radius:50%}
+#main{overflow:hidden;height:calc(100vh - 64px);position:relative}
+svg{width:100%;height:100%}
+.lk{fill:none;stroke:var(--brd);stroke-width:.7}
+.nd{cursor:pointer}
+.nd circle.bg{stroke-width:1.5;transition:r .12s,opacity .15s}
+.nd:hover circle.bg{filter:brightness(1.3)}
+.nd .img-ring{fill:none;stroke-width:2;transition:stroke-width .12s,r .12s}
+.nd:hover .img-ring{stroke-width:2.8}
+.nd text{font-size:11px;fill:var(--txt);pointer-events:none;dominant-baseline:central}
+.primary-lbl{font-style:italic;fill:var(--txt2)!important}
+.secondary-lbl{font-size:9px;fill:var(--txt3)!important}
+.nh circle.bg,.nh .img-ring{stroke:var(--hl)!important;stroke-width:2.5!important}
+.nh text{fill:var(--hl)!important}
+.nm{opacity:.1}
+/* ツールチップ */
+#tt{position:absolute;background:var(--bg2);border:1px solid var(--brd);
+  border-radius:10px;padding:0;pointer-events:auto;display:none;
+  width:220px;z-index:50;overflow:hidden;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+#tt-img{width:220px;height:136px;object-fit:cover;display:block;background:var(--bg3)}
+#tt-img.hidden{display:none}
+#tt-ph{width:220px;height:136px;display:flex;align-items:center;justify-content:center;
+  font-size:30px;background:var(--bg3)}
+#tt-ph.hidden{display:none}
+#tt-body{padding:9px 12px}
+#tt-rank{font-size:10px;color:var(--txt3)}
+#tt-name{font-weight:600;font-size:12px;font-style:italic;
+  word-break:break-all;margin-top:1px}
+#tt-ja{color:var(--txt2);font-size:11px;margin-top:1px}
+#tt-meta{font-size:10px;color:var(--txt3);margin-top:5px;
+  padding-top:5px;border-top:1px solid var(--brd);
+  display:flex;justify-content:space-between;align-items:flex-end}
+#tt-cnt{white-space:nowrap}
+#tt-credit{font-size:9px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:130px;text-align:right}
+#foot{position:absolute;bottom:7px;left:9px;font-size:10px;color:var(--txt3);
+  background:var(--foot-bg);padding:4px 8px;border-radius:5px;
+  border:1px solid var(--brd);line-height:1.8;pointer-events:none}
+/* ── モバイル専用スタイル ─────────────── */
+@media (pointer: coarse) {
+  /* ツールチップを画面中央下部に固定 */
+  #tt{
+    position:fixed !important;
+    left:50% !important;
+    transform:translateX(-50%);
+    bottom:12px !important;
+    top:auto !important;
+    width:min(320px, calc(100vw - 24px)) !important;
+    max-height:75vh;
+    overflow-y:auto;
+    box-shadow:0 -4px 24px rgba(0,0,0,.5);
+  }
+  /* 閉じるボタンを表示 */
+  #tt-close{ display:flex !important }
+  /* ノードのタップ領域を広げる */
+  .nd circle.bg{ stroke-width:2 }
+  /* 長押しフィードバック */
+  .nd.pressing circle.bg{
+    stroke:var(--hl) !important;
+    stroke-width:3 !important;
+    transition:stroke .1s,stroke-width .1s;
+  }
+  /* モバイルで画像を横幅いっぱいに */
+  #tt-img,#tt-ph{
+    width:100% !important;
+    height:160px !important;
+  }
+  /* Wikipedia ボタンをタップしやすく */
+  #tt-wiki-btn{
+    padding:10px 0 !important;
+    font-size:13px !important;
+  }
+  /* ヘッダーボタンを少し大きく */
+  .hb,.tb{ padding:5px 10px !important; font-size:12px !important; }
+}
+#ov{position:fixed;inset:0;background:rgba(13,17,23,.97);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:11px;z-index:999}
+#ov h2{font-size:16px}
+#ov p{font-size:12px;color:var(--txt2);text-align:center;max-width:320px}
+.pb{width:240px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.pi{height:100%;background:var(--hl);border-radius:2px;width:0;transition:width .3s}
+</style></head>
+<body style="display:flex;flex-direction:column">
+<div id="ov"><h2>🌿 系統図を準備中…</h2>
+  <p id="om">データ解析中</p>
+  <div class="pb"><div class="pi" id="pi"></div></div></div>
+<div id="hdr">
+  <div id="ttl"><em>サル目 (Primates)</em> 系統図</div>
+  <input id="srch" placeholder="検索…" oninput="doSrch(this.value)">
+  <button class="hb" onclick="expandTo('family')">科まで</button>
+  <button class="hb" onclick="expandTo('genus')">属まで</button>
+  <button class="hb" onclick="expandTo('species')">全展開</button>
+  <button class="hb" onclick="collapseAll()">折りたたむ</button>
+  <button class="hb" onclick="fitV(false)">全体表示</button>
+  <div class="ctrl">
+    <button class="tb" id="btn-theme" onclick="toggleTheme()" title="テーマ切り替え">🌙</button>
+  </div>
+  <div class="ctrl">
+    <button class="tb active" id="btn-ja" onclick="setLang('ja')" title="日本語優先">JA</button>
+    <button class="tb"        id="btn-en" onclick="setLang('en')" title="英語優先">EN</button>
+  </div>
+  <div class="ctrl">
+    <button class="tb active" id="btn-lr" onclick="setLayout('lr')" title="左→右">LR</button>
+    <button class="tb"        id="btn-tb" onclick="setLayout('tb')" title="上→下">TB</button>
+  </div>
+  <div class="ctrl">
+    <button class="tb active" id="btn-icon" onclick="toggleIcons()" title="画像アイコン ON/OFF">🖼</button>
+  </div>
+  <div id="stat"></div>
+</div>
+<div id="leg">
+  <span>凡例：</span>
+  <div class="li"><div class="ld" style="background:var(--c-order)"></div>目</div>
+  <div class="li"><div class="ld" style="background:var(--c-family)"></div>科</div>
+  <div class="li"><div class="ld" style="background:var(--c-genus)"></div>属</div>
+  <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>
+  <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亜種</div>
+  <span id="leg-hint" style="margin-left:7px">▶クリックで展開 ／ ドラッグ・ホイールでナビ</span>
+</div>
+<div id="main">
+  <svg id="tree"></svg>
+  <div id="tt">
+    <!-- 閉じるボタン（モバイルのみ表示） -->
+    <div id="tt-close"
+      style="display:none;justify-content:flex-end;padding:6px 8px 0;cursor:pointer"
+      onclick="tt.style.display='none'">
+      <span style="font-size:18px;line-height:1;color:var(--txt3)">✕</span>
+    </div>
+    <img id="tt-img" src="" alt="" crossorigin="anonymous"
+         onerror="this.classList.add('hidden');document.getElementById('tt-ph').classList.remove('hidden')">
+    <div id="tt-ph" class="hidden">🌿</div>
+    <div id="tt-body">
+      <div id="tt-rank"></div>
+      <div id="tt-name"></div>
+      <div id="tt-ja"></div>
+      <div id="tt-meta">
+        <span id="tt-cnt"></span>
+        <span id="tt-credit"></span>
+      </div>
+      <div id="tt-wiki" style="display:none;margin-top:6px">
+        <button id="tt-wiki-btn"
+          style="width:100%;padding:4px 0;font-size:10px;cursor:pointer;
+            background:transparent;border:1px solid var(--brd);
+            border-radius:6px;color:var(--hl);pointer-events:all"
+          onclick="openWiki(currentTTNode)">
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="foot">QID: Q7380 &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-03-24</div>
+</div>
+<script>
+const DATA={"id":"Q7380","name":"Primates","ja":"サル目","rank":"order","children":[{"id":"Q21684957","name":"Anthropoidea","ja":"真猿亜目","rank":"subclass","wiki_url":"https://www.wikidata.org/wiki/Q21684957","children":[{"id":"Q30094061","name":"Amphipithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q30094061","children":[{"id":"Q126726607","name":"Siamopithecinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q126726607","children":[]},{"id":"Q20312785","name":"Amphipithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q20312785","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Amphipithecus_mogaungensis.jpg/120px-Amphipithecus_mogaungensis.jpg"},{"id":"Q115714618","name":"Bugtipithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q115714618","children":[]},{"id":"Q115142674","name":"Krabia","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q115142674","children":[]},{"id":"Q115731646","name":"Myanmarpithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q115731646","children":[]},{"id":"Q115120905","name":"Siamopithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q115120905","children":[]}]},{"id":"Q21684959","name":"Hapalidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q21684959","children":[{"id":"Q33149634","name":"Callimiconinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33149634","children":[]},{"id":"Q21684961","name":"Hapale","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q21684961","children":[{"id":"Q122213240","name":"Hapale devillei","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q122213240","children":[]},{"id":"Q41165100","name":"Hapale emiliae","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q41165100","children":[]},{"id":"Q41165103","name":"Hapale flaviceps","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q41165103","children":[]},{"id":"Q125923204","name":"Hapale fuscus","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q125923204","children":[]},{"id":"Q21684965","name":"Hapale illigeri","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q21684965","children":[]},{"id":"Q41165105","name":"Hapale leucopus","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q41165105","children":[]},{"id":"Q122213119","name":"Hapale nigrifrons","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q122213119","children":[]}]}]},{"id":"Q33135758","name":"Proteopithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q33135758","children":[{"id":"Q107002473","name":"Proteopithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q107002473","children":[{"id":"Q126724988","name":"Proteopithecus sylviae","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q126724988","children":[]}]}]},{"id":"Q115198309","name":"Aseanpithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q115198309","children":[]},{"id":"Q120553506","name":"Ashaninkacebus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q120553506","children":[]},{"id":"Q25386180","name":"Perupithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q25386180","children":[]}]},{"id":"Q122999780","name":"Cheiropoda","ja":"","rank":"subclass","wiki_url":"https://www.wikidata.org/wiki/Q122999780","children":[{"id":"Q122999797","name":"Anthropida","ja":"","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q122999797","children":[]},{"id":"Q122999805","name":"Lemuria","ja":"","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q122999805","children":[]}]},{"id":"Q82261","name":"Haplorhini","ja":"直鼻猿亜目","rank":"subclass","wiki_url":"https://www.wikidata.org/wiki/Q82261","children":[{"id":"Q18604607","name":"Propliopithecoidea","ja":"","rank":"superfamily","wiki_url":"https://www.wikidata.org/wiki/Q18604607","children":[{"id":"Q3534193","name":"Oligopithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q3534193","children":[{"id":"Q5053851","name":"Catopithecus","ja":"カトピテクス","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q5053851","children":[{"id":"Q20717410","name":"Catopithecus browni","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q20717410","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/Catopithecus_browni.jpg/120px-Catopithecus_browni.jpg"},{"id":"Q107036450","name":"Talahpithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q107036450","children":[]}]},{"id":"Q3821037","name":"Propliopithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q3821037","children":[{"id":"Q18604603","name":"Aegyptopithecus","ja":"エジプトピテクス","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q18604603","children":[{"id":"Q131676","name":"Aegyptopithecus zeuxis","ja":"エジプトピテクス","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q131676","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/6/60/Aegyptopithecus_NT.jpg/120px-Aegyptopithecus_NT.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/6/60/Aegyptopithecus_NT.jpg/120px-Aegyptopithecus_NT.jpg"},{"id":"Q29582615","name":"Oligopithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q29582615","children":[{"id":"Q126723002","name":"Oligopithecus rogeri","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q126723002","children":[]},{"id":"Q7086847","name":"Oligopithecus savagei","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q7086847","children":[]}]},{"id":"Q2359124","name":"Propliopithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q2359124","children":[{"id":"Q50877507","name":"Propliopithecus ankeli","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q50877507","children":[]},{"id":"Q50877554","name":"Propliopithecus chirobates","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q50877554","children":[]},{"id":"Q20719131","name":"Propliopithecus haeckeli","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q20719131","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Propliopithecus_haeckeli_mandible.JPG/120px-Propliopithecus_haeckeli_mandible.JPG"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Aegyptopithecus_Pte.svg/120px-Aegyptopithecus_Pte.svg.png"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/c/c9/Aegyptopithecus_Pte.svg/120px-Aegyptopithecus_Pte.svg.png"},{"id":"Q133150646","name":"Amamria","ja":"Q133150646","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q133150646","children":[]},{"id":"Q138327270","name":"Eosimiiformes","ja":"Q138327270","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q138327270","children":[]},{"id":"Q135774170","name":"Omomyiformes","ja":"","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q135774170","children":[]},{"id":"Q5452918","name":"Simiiformes","ja":"真猿型下目","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q5452918","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Simiiformes.png/120px-Simiiformes.png"},{"id":"Q2703853","name":"Tarsiiformes","ja":"メガネザル型下目","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q2703853","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/e/ec/Tarsier_Hugs_Mossy_Branch.jpg/120px-Tarsier_Hugs_Mossy_Branch.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/Totenkopfaeffchen.jpg/120px-Totenkopfaeffchen.jpg"},{"id":"Q426505","name":"Plesiadapiformes","ja":"プレシアダピス目","rank":"subclass","wiki_url":"https://www.wikidata.org/wiki/Q426505","children":[{"id":"Q116776638","name":"Carpolestoidea","ja":"","rank":"superfamily","wiki_url":"https://www.wikidata.org/wiki/Q116776638","children":[]},{"id":"Q33188310","name":"Microsyopoidea","ja":"","rank":"superfamily","wiki_url":"https://www.wikidata.org/wiki/Q33188310","children":[{"id":"Q35078132","name":"Palaechthonidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q35078132","children":[{"id":"Q35092145","name":"Palaechthoninae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q35092145","children":[]},{"id":"Q35091970","name":"Plesiolestinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q35091970","children":[]},{"id":"Q7187964","name":"Phoxomylus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q7187964","children":[{"id":"Q21308366","name":"Phoxomylus puncticuspis","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q21308366","children":[]}]},{"id":"Q79442557","name":"Torrejonia","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q79442557","children":[{"id":"Q79444328","name":"Torrejonia sirokyi","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q79444328","children":[]},{"id":"Q79445015","name":"Torrejonia wilsoni","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q79445015","children":[]}]}]},{"id":"Q35079791","name":"Picromomyidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q35079791","children":[{"id":"Q134463056","name":"Picromomys","ja":"Q134463056","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q134463056","children":[{"id":"Q134463081","name":"Picromomys petersonorum","ja":"Q134463081","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q134463081","children":[]}]}]},{"id":"Q35079404","name":"Toliapinidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q35079404","children":[]}]},{"id":"Q33189794","name":"Paromomyoidea","ja":"","rank":"superfamily","wiki_url":"https://www.wikidata.org/wiki/Q33189794","children":[]},{"id":"Q10350512","name":"Plesiadapoidea","ja":"","rank":"superfamily","wiki_url":"https://www.wikidata.org/wiki/Q10350512","children":[{"id":"Q135772991","name":"Chronolestidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q135772991","children":[]},{"id":"Q33134732","name":"Picrodontidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q33134732","children":[{"id":"Q134393524","name":"Picrodus","ja":"Q134393524","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q134393524","children":[]}]},{"id":"Q33134211","name":"Platychoeropidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q33134211","children":[]},{"id":"Q3129990","name":"Plesiadapidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q3129990","children":[{"id":"Q33143950","name":"Asioplesiadapinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33143950","children":[{"id":"Q133456220","name":"Asioplesiadapis","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q133456220","children":[{"id":"Q133456227","name":"Asioplesiadapis youngi","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q133456227","children":[]}]}]},{"id":"Q85752148","name":"Chiromyoides","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q85752148","children":[]},{"id":"Q122829540","name":"Jattadectes","ja":"Q122829540","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q122829540","children":[{"id":"Q122829549","name":"Jattadectes mamikheli","ja":"Q122829549","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q122829549","children":[]}]},{"id":"Q21230791","name":"Nannodectes","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q21230791","children":[{"id":"Q21311155","name":"Nannodectes lynasi","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q21311155","children":[]}]},{"id":"Q1191111","name":"Plesiadapis","ja":"プレシアダピス","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q1191111","children":[{"id":"Q126718460","name":"Plesiadapis berruensis","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q126718460","children":[]},{"id":"Q131170400","name":"Plesiadapis cookei","ja":"Q131170400","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q131170400","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/PlesiadapisNewZICA.png/120px-PlesiadapisNewZICA.png"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/PlesiadapisNewZICA.png/120px-PlesiadapisNewZICA.png"},{"id":"Q10368692","name":"Saxonellidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q10368692","children":[{"id":"Q108546370","name":"Saxonella","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q108546370","children":[{"id":"Q126687363","name":"Saxonella naylori","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q126687363","children":[]}]}]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/PlesiadapisNewZICA.png/120px-PlesiadapisNewZICA.png"},{"id":"Q3775994","name":"Carpolestidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q3775994","children":[{"id":"Q33139534","name":"Carpolestinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33139534","children":[]},{"id":"Q33148957","name":"Chronolestinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33148957","children":[]},{"id":"Q136004620","name":"Carpocristes","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q136004620","children":[{"id":"Q136004575","name":"Carpocristes oriens","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q136004575","children":[]}]},{"id":"Q95952104","name":"Carpodaptes","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q95952104","children":[]},{"id":"Q3753270","name":"Carpolestes","ja":"カルポレステス","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q3753270","children":[{"id":"Q20717335","name":"Carpolestes nigridens","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q20717335","children":[]},{"id":"Q2315071","name":"Carpolestes simpsoni","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q2315071","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/59/CarpolestesCL.png/120px-CarpolestesCL.png"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/CarpolestesZICA.png/120px-CarpolestesZICA.png"},{"id":"Q117204896","name":"Chronolestes","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q117204896","children":[{"id":"Q136004763","name":"Chronolestes simul","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q136004763","children":[]}]},{"id":"Q117205008","name":"Elphidotarsius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q117205008","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/CarpolestesZICA.png/120px-CarpolestesZICA.png"},{"id":"Q2459615","name":"Paromomyidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q2459615","children":[{"id":"Q33141681","name":"Paromomyinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33141681","children":[]},{"id":"Q33139264","name":"Phenacolemurinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33139264","children":[{"id":"Q33176344","name":"Phenacolemurini","ja":"","rank":"tribe","wiki_url":"https://www.wikidata.org/wiki/Q33176344","children":[{"id":"Q60791258","name":"Ignacius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q60791258","children":[{"id":"Q116748702","name":"Ignacius dawsonae","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q116748702","children":[]},{"id":"Q116748694","name":"Ignacius mckennai","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q116748694","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/bc/Ignacius_NT.jpg/120px-Ignacius_NT.jpg"},{"id":"Q17640579","name":"Phenacolemur","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q17640579","children":[]}]},{"id":"Q33176698","name":"Simpsonlemurini","ja":"","rank":"tribe","wiki_url":"https://www.wikidata.org/wiki/Q33176698","children":[]}]},{"id":"Q33155830","name":"Purgatoriinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33155830","children":[]},{"id":"Q28431204","name":"Acidomomys","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q28431204","children":[]},{"id":"Q11906407","name":"Arcius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q11906407","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Arcius_rougieri_mandible.JPG/120px-Arcius_rougieri_mandible.JPG"},{"id":"Q5346955","name":"Edworthia","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q5346955","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/bc/Ignacius_NT.jpg/120px-Ignacius_NT.jpg"},{"id":"Q21231553","name":"Purgatoriidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q21231553","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/1/10/Purgatorius_PNAS.jpg/120px-Purgatorius_PNAS.jpg"},{"id":"Q131234806","name":"Niptomomys","ja":"Q131234806","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q131234806","children":[]},{"id":"Q136654","name":"Purgatorius","ja":"プルガトリウス","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q136654","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/8/82/Purgatorius_BW.jpg/120px-Purgatorius_BW.jpg"},{"id":"Q20721981","name":"Ursolestes","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q20721981","children":[]},{"id":"Q108397811","name":"Euprimateformes","ja":"","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q108397811","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/e/ed/Plesiadapis_tricuspidens_Cernay-Berru.jpg/120px-Plesiadapis_tricuspidens_Cernay-Berru.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/PlesiadapisNewZICA.png/120px-PlesiadapisNewZICA.png"},{"id":"Q82265","name":"Strepsirrhini","ja":"曲鼻猿亜目","rank":"subclass","wiki_url":"https://www.wikidata.org/wiki/Q82265","children":[{"id":"Q4832560","name":"Azibiidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q4832560","children":[{"id":"Q4832562","name":"Azibius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q4832562","children":[]}]},{"id":"Q5285265","name":"Djebelemuridae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q5285265","children":[{"id":"Q20672858","name":"Djebelemur","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q20672858","children":[{"id":"Q3032855","name":"Djebelemur martinezi","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q3032855","children":[]}]},{"id":"Q137737526","name":"Lazibadapis","ja":"Q137737526","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q137737526","children":[]},{"id":"Q19757530","name":"Omanodon","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q19757530","children":[]},{"id":"Q19757528","name":"Shizarodon","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q19757528","children":[]}]},{"id":"Q20967121","name":"Plesiopithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q20967121","children":[{"id":"Q3392299","name":"Plesiopithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q3392299","children":[{"id":"Q20719076","name":"Plesiopithecus teras","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q20719076","children":[]}]}]},{"id":"Q135982602","name":"Bugtilemurinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q135982602","children":[]},{"id":"Q135042","name":"Adapiformes","ja":"","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q135042","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/f/f7/Notharctus_tenebrosus_AMNH.jpg/120px-Notharctus_tenebrosus_AMNH.jpg"},{"id":"Q3183897","name":"Chiromyiformes","ja":"アイアイ科","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q3183897","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/6/65/Aye_aye.jpg/120px-Aye_aye.jpg"},{"id":"Q37212","name":"Lemuriformes","ja":"キツネザル科","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q37212","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Indri_Indri.jpg/120px-Indri_Indri.jpg"},{"id":"Q545982","name":"Lorisiformes","ja":"ロリス下目","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q545982","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/0/01/Greater_Bush_Baby.jpg/120px-Greater_Bush_Baby.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/Propithecus_verreauxi.JPG/120px-Propithecus_verreauxi.JPG"},{"id":"Q7444798","name":"Secundates","ja":"","rank":"order","wiki_url":"https://www.wikidata.org/wiki/Q7444798","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Mammiferes.jpeg/120px-Mammiferes.jpeg"},{"id":"Q3055654","name":"Eosimiidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q3055654","children":[{"id":"Q18578663","name":"Anthrasimias","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q18578663","children":[{"id":"Q4773864","name":"Anthrasimias gujaratensis","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q4773864","children":[]}]},{"id":"Q120553506","name":"Ashaninkacebus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q120553506","children":[{"id":"Q122847988","name":"Ashaninkacebus simpsoni","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q122847988","children":[]}]},{"id":"Q20672592","name":"Bahinia","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q20672592","children":[{"id":"Q2879284","name":"Bahinia pondaungensis","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q2879284","children":[]}]},{"id":"Q135069","name":"Eosimias","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q135069","children":[{"id":"Q842898","name":"Eosimias sinensis","ja":"中華曙猿","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q842898","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/EosimiasDB15.jpg/120px-EosimiasDB15.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/a5/EosimiasDB15.jpg/120px-EosimiasDB15.jpg"},{"id":"Q115777162","name":"Phenacopithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q115777162","children":[]},{"id":"Q56291582","name":"Phileosimias","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q56291582","children":[]},{"id":"Q132155639","name":"Sungulusimias","ja":"Q132155639","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q132155639","children":[]}]},{"id":"Q175626","name":"Indriidae","ja":"インドリ科","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q175626","children":[{"id":"Q5372461","name":"Indriinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q5372461","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Indri_indri_001.jpg/120px-Indri_indri_001.jpg"},{"id":"Q1422291","name":"Palaeopropithecinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q1422291","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Palaeopropithecus_ingens.jpg/120px-Palaeopropithecus_ingens.jpg"},{"id":"Q1064408","name":"Avahi","ja":"ウーリーキツネザル(アバヒ属)","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q1064408","children":[{"id":"Q832240","name":"Avahi betsileo","ja":"ベトシレオアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q832240","children":[]},{"id":"Q1099688","name":"Avahi cleesei","ja":"クリーズアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1099688","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Avahi_cleesei.png/120px-Avahi_cleesei.png"},{"id":"Q307262","name":"Avahi laniger","ja":"ヒガシアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q307262","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Avahi_laniger_Grandidier.jpg/120px-Avahi_laniger_Grandidier.jpg"},{"id":"Q1350349","name":"Avahi meridionalis","ja":"ミナミアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1350349","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Avahi_meridionalis_002.jpg/120px-Avahi_meridionalis_002.jpg"},{"id":"Q1206238","name":"Avahi mooreorum","ja":"ムーアアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1206238","children":[]},{"id":"Q1194866","name":"Avahi occidentalis","ja":"ニシアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1194866","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/2/26/Avahi_occidentalis.jpg/120px-Avahi_occidentalis.jpg"},{"id":"Q1210782","name":"Avahi peyrierasi","ja":"ペリエラスアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1210782","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Avahi_peyrierasi_99660950.jpg/120px-Avahi_peyrierasi_99660950.jpg"},{"id":"Q1210789","name":"Avahi ramanantsoavanai","ja":"ラマナンツァヴァナアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1210789","children":[]},{"id":"Q1365845","name":"Avahi unicolor","ja":"サンビラノアバヒ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1365845","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Avahi_laniger_Grandidier.jpg/120px-Avahi_laniger_Grandidier.jpg"},{"id":"Q19816385","name":"Indri","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q19816385","children":[{"id":"Q203868","name":"Indri indri","ja":"インドリ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q203868","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Indri_indri_001.jpg/120px-Indri_indri_001.jpg"},{"id":"Q125217176","name":"Indri longicaudatus","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q125217176","children":[]},{"id":"Q125678959","name":"Indri niger","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q125678959","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/2/27/Indri_niger_%28Audebert%29.jpg/120px-Indri_niger_%28Audebert%29.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Indri_indri_001.jpg/120px-Indri_indri_001.jpg"},{"id":"Q125217192","name":"Indris","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q125217192","children":[{"id":"Q125217185","name":"Indris longicaudatus","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q125217185","children":[]}]},{"id":"Q673365","name":"Propithecus","ja":"シファカ属","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q673365","children":[{"id":"Q40648098","name":"Propithecus bicolor","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q40648098","children":[]},{"id":"Q763853","name":"Propithecus candidus","ja":"シルキーシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q763853","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/Propithecus_candidus_001.jpg/120px-Propithecus_candidus_001.jpg"},{"id":"Q1131678","name":"Propithecus coquereli","ja":"コクレルシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1131678","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/c/c7/Sifaka_in_Madagascar.jpg/120px-Sifaka_in_Madagascar.jpg"},{"id":"Q179384","name":"Propithecus coronatus","ja":"クロカンムリシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q179384","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/2/21/Propithecus_coronatus_2.jpg/120px-Propithecus_coronatus_2.jpg"},{"id":"Q1184997","name":"Propithecus deckenii","ja":"デッケンシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1184997","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/0/0d/Van_der_Decken%27s_Sifaka_in_Namoroka.jpg/120px-Van_der_Decken%27s_Sifaka_in_Namoroka.jpg"},{"id":"Q677608","name":"Propithecus diadema","ja":"ダイアデムシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q677608","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/6/6c/Diademed_ready_to_push_off.jpg/120px-Diademed_ready_to_push_off.jpg"},{"id":"Q1202844","name":"Propithecus edwardsi","ja":"ミルンエドワーズシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1202844","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/9/99/Milne-Edwards_Sifaka_%2815720281920%29.jpg/120px-Milne-Edwards_Sifaka_%2815720281920%29.jpg"},{"id":"Q40648207","name":"Propithecus holomelas","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q40648207","children":[]},{"id":"Q1350394","name":"Propithecus perrieri","ja":"ペリエシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q1350394","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Propithecus_perrieri_001.jpg/120px-Propithecus_perrieri_001.jpg"},{"id":"Q775574","name":"Propithecus tattersalli","ja":"タターサルシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q775574","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Propithecus_tattersalli_001.jpg/120px-Propithecus_tattersalli_001.jpg"},{"id":"Q913789","name":"Propithecus verreauxi","ja":"ベローシファカ","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q913789","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/5f/Propithecus_verreauxi_002.jpg/120px-Propithecus_verreauxi_002.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Diademed_Sifaka_%28Propithecus_diadema%29.jpg/120px-Diademed_Sifaka_%28Propithecus_diadema%29.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Indri_Indri.jpg/120px-Indri_Indri.jpg"},{"id":"Q4286589","name":"Megaladapidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q4286589","children":[{"id":"Q137557","name":"Megaladapis","ja":"メガラダピス","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q137557","children":[{"id":"Q20719692","name":"Megaladapis edwardsi","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q20719692","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Megaladaspis_madagascariensis.jpg/120px-Megaladaspis_madagascariensis.jpg"},{"id":"Q22104196","name":"Megaladapis grandidieri","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22104196","children":[]},{"id":"Q22104214","name":"Megaladapis madagascariensis","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22104214","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Megaladapis.jpg/120px-Megaladapis.jpg"}]},{"id":"Q28456377","name":"Micromomyidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q28456377","children":[{"id":"Q117204993","name":"Dryomomys","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q117204993","children":[]},{"id":"Q117205461","name":"Micromomys","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q117205461","children":[]}]},{"id":"Q6013499","name":"Microsyopidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q6013499","children":[{"id":"Q33150689","name":"Micromomyinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33150689","children":[]},{"id":"Q33139796","name":"Microsyopinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33139796","children":[]},{"id":"Q33140680","name":"Uintasoricinae","ja":"","rank":"subfamily","wiki_url":"https://www.wikidata.org/wiki/Q33140680","children":[{"id":"Q104874255","name":"Uintasorex","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q104874255","children":[]}]},{"id":"Q28455296","name":"Microsyops","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q28455296","children":[]},{"id":"Q108554849","name":"Navajovius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q108554849","children":[{"id":"Q134344827","name":"Navajovius kohlhaasae","ja":"Q134344827","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q134344827","children":[]}]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/6/64/Microsyops_cardiorestes_Gunnell.jpg/120px-Microsyops_cardiorestes_Gunnell.jpg"},{"id":"Q18088610","name":"Oreopithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q18088610","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/Oreopithecus_bambolii_-_Baccinello.JPG/120px-Oreopithecus_bambolii_-_Baccinello.JPG"},{"id":"Q15982606","name":"Palaeopropithecidae","ja":"スロスキツネザル","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q15982606","children":[{"id":"Q13223268","name":"Archaeoindris","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q13223268","children":[{"id":"Q292104","name":"Archaeoindris fontoynontii","ja":"Archaeoindris fontoynonti","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q292104","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/Archaeoindris_fontoynonti.jpg/120px-Archaeoindris_fontoynonti.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/Archaeoindris_fontoynonti.jpg/120px-Archaeoindris_fontoynonti.jpg"},{"id":"Q292054","name":"Babakotia","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q292054","children":[{"id":"Q22109264","name":"Babakotia radofilai","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22109264","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/ad/Babakotia_radofilai.jpg/120px-Babakotia_radofilai.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/a/ad/Babakotia_radofilai.jpg/120px-Babakotia_radofilai.jpg"},{"id":"Q292116","name":"Mesopropithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q292116","children":[{"id":"Q22106283","name":"Mesopropithecus dolichobrachion","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22106283","children":[]},{"id":"Q22106305","name":"Mesopropithecus globiceps","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22106305","children":[]},{"id":"Q22106327","name":"Mesopropithecus pithecoides","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22106327","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/1/14/Mesopropithecus_globiceps_skull_001.jpg/120px-Mesopropithecus_globiceps_skull_001.jpg"},{"id":"Q134792","name":"Palaeopropithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q134792","children":[{"id":"Q13847194","name":"Palaeopropithecus ingens","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q13847194","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Palaeopropithecus_ingens.jpg/120px-Palaeopropithecus_ingens.jpg"},{"id":"Q21321278","name":"Palaeopropithecus kelyus","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q21321278","children":[]},{"id":"Q22102697","name":"Palaeopropithecus maximus","ja":"","rank":"species","wiki_url":"https://www.wikidata.org/wiki/Q22102697","children":[]}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Palaeopropithecus_ingens.jpg/120px-Palaeopropithecus_ingens.jpg"}],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/50/Palaeopropithecus_ingens.jpg/120px-Palaeopropithecus_ingens.jpg"},{"id":"Q122811549","name":"Pithecidae","ja":"","rank":"family","wiki_url":"https://www.wikidata.org/wiki/Q122811549","children":[]},{"id":"Q627032","name":"Altiatlasius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q627032","children":[]},{"id":"Q123002598","name":"Brachyurus","ja":"Brachyurus Spix, 1823","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q123002598","children":[]},{"id":"Q99159019","name":"Dinanthropoides","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q99159019","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/d7/Yeti_Snowman_portrait.png/120px-Yeti_Snowman_portrait.png"},{"id":"Q122216717","name":"Eriodes","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q122216717","children":[]},{"id":"Q21368935","name":"Nosmips","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q21368935","children":[]},{"id":"Q19757523","name":"Notnamaia","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q19757523","children":[]},{"id":"Q122216357","name":"Nyctipithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q122216357","children":[]},{"id":"Q20721980","name":"Pandemonium","ja":"パンデモーニウム","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q20721980","children":[]},{"id":"Q122443775","name":"Papio","ja":"Papio Müller, 1773","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q122443775","children":[]},{"id":"Q41157165","name":"Pithecus","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q41157165","children":[]},{"id":"Q122811490","name":"Pithecus","ja":"Pithecus Cuvier, 1800","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q122811490","children":[]},{"id":"Q122811534","name":"Pithecus","ja":"Pithecus Geoffroy, 1812","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q122811534","children":[]},{"id":"Q1427112","name":"Simia","ja":"Simia Linnaeus, 1758","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q1427112","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/f/f8/BrehmsTierleben15.jpg/120px-BrehmsTierleben15.jpg"},{"id":"Q19757501","name":"Sulaimanius","ja":"","rank":"genus","wiki_url":"https://www.wikidata.org/wiki/Q19757501","children":[]},{"id":"Q841759","name":"Prosimii","ja":"原猿類","rank":"unknown","wiki_url":"https://www.wikidata.org/wiki/Q841759","children":[],"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Ring_tailed_lemur_and_twins.jpg/120px-Ring_tailed_lemur_and_twins.jpg"}],"_meta":{"fetch_version":"1.4","fetched_at":"2026-03-24T20:04:34","split_rank":"family","stop_rank":"species"}};
+const RANK_ORD=["domain","kingdom","subkingdom","phylum","subphylum","superclass",
+  "class","subclass","infraclass","superorder","order","suborder","infraorder",
+  "superfamily","family","subfamily","tribe","subtribe","genus","subgenus",
+  "species","subspecies","variety","form"];
+const RC={domain:"var(--c-domain)",kingdom:"var(--c-kingdom)",phylum:"var(--c-phylum)",
+  subphylum:"var(--c-phylum)",superclass:"var(--c-class)",class:"var(--c-class)",
+  subclass:"var(--c-class)",infraclass:"var(--c-class)",
+  superorder:"var(--c-order)",order:"var(--c-order)",suborder:"var(--c-suborder)",
+  infraorder:"var(--c-infraorder)",superfamily:"var(--c-superfamily)",
+  family:"var(--c-family)",subfamily:"var(--c-subfamily)",
+  tribe:"var(--c-tribe)",subtribe:"var(--c-tribe)",
+  genus:"var(--c-genus)",subgenus:"var(--c-genus)",
+  species:"var(--c-species)",subspecies:"var(--c-subspecies)",
+  variety:"var(--c-variety)",form:"var(--c-variety)",unknown:"var(--c-unknown)"};
+const RR_BASE={domain:10,kingdom:9,phylum:8,subphylum:7,superclass:7,class:7,
+  subclass:6,infraclass:6,superorder:6,order:6,suborder:5,infraorder:5,
+  superfamily:5,family:4.5,subfamily:4,tribe:3.5,subtribe:3.5,
+  genus:3,subgenus:3,species:2,subspecies:1.8,variety:1.8,form:1.8,unknown:2};
+const IMG_R = 11;   // 画像アイコン半径(px)
+const RJ={domain:"域",kingdom:"界",subkingdom:"亜界",phylum:"門",subphylum:"亜門",
+  superclass:"上綱",class:"綱",subclass:"亜綱",infraclass:"下綱",
+  superorder:"上目",order:"目",suborder:"亜目",infraorder:"下目",
+  superfamily:"上科",family:"科",subfamily:"亜科",tribe:"族",subtribe:"亜族",
+  genus:"属",subgenus:"亜属",species:"種",subspecies:"亜種",
+  variety:"変種",form:"品種",unknown:"?"};
+
+// ─── 状態 ────────────────────────────────────────────────────────
+let langMode   = localStorage.getItem("taxa_lang")   || "ja";
+let layoutMode = localStorage.getItem("taxa_layout") || "lr";
+let showIcons  = localStorage.getItem("taxa_icons")  !== "0";
+
+// 画像ありの種ノードに使う実効半径
+function nodeR(d) {
+  if (showIcons && d.data.image_url &&
+      ["species","subspecies","variety","form"].includes(d.data.rank))
+    return IMG_R;
+  return RR_BASE[d.data.rank] || 2;
+}
+// テキスト X オフセット（画像ノードは半径が大きい分ずらす）
+function textX(d) {
+  const r  = nodeR(d);
+  const lx = hk(d) ? -(r + 5) : (r + 5);
+  return lx;
+}
+
+// ─── 言語ヘルパー ─────────────────────────────────────────────────
+function getLabels(d) {
+  const sci = d.data.name || "";
+  const ja  = d.data.ja   || "";
+  return langMode === "ja"
+    ? { primary: ja || sci, secondary: ja ? sci : "" }
+    : { primary: sci,       secondary: ja };
+}
+
+// ─── テキスト属性（LR / TB 共通ヘルパー） ─────────────────────────
+function applyPrimaryAttrs(sel) {
+  sel.attr("transform",    d => tbEnTransform(d, false))
+     .attr("writing-mode", () => tbJaWritingMode())
+     .attr("x",            d => layoutMode === "lr" ? textX(d) : (langMode === "ja" ? (hk(d) ? -4 : 4) : 0))
+     .attr("y",            d => layoutMode !== "tb" ? null : (langMode === "ja" ? (hk(d) ? -nodeR(d)-3 : nodeR(d)+3) : nodeR(d)+2))
+     .attr("dy",           () => layoutMode === "lr" ? "0em" : null)
+     .attr("text-anchor",  d => primaryAnchor(d));
+}
+function applySecondaryAttrs(sel) {
+  sel.attr("transform",    d => tbEnTransform(d, true))
+     .attr("writing-mode", () => tbJaWritingMode())
+     .attr("x",            d => layoutMode === "lr" ? textX(d) : (langMode === "ja" ? (hk(d) ? -14 : 14) : 0))
+     .attr("y",            d => layoutMode !== "tb" ? null : (langMode === "ja" ? (hk(d) ? -nodeR(d)-3 : nodeR(d)+3) : nodeR(d)+14))
+     .attr("dy",           () => layoutMode === "lr" ? "1.5em" : null)
+     .attr("text-anchor",  d => primaryAnchor(d));
+}
+function tbEnTransform(d, isSec) {
+  if (layoutMode !== "tb" || langMode !== "en") return null;
+  return `rotate(-90,0,${isSec ? nodeR(d)+14 : nodeR(d)+2})`;
+}
+function tbJaWritingMode() {
+  return (layoutMode === "tb" && langMode === "ja") ? "vertical-rl" : null;
+}
+function primaryAnchor(d) {
+  if (layoutMode === "lr") return hk(d) ? "end" : "start";
+  if (langMode === "ja")   return hk(d) ? "end" : "start";
+  return hk(d) ? "start" : "end";
+}
+
+// ─── テーマ切り替え ───────────────────────────────────────────────
+function toggleTheme() {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  document.getElementById("btn-theme").textContent = next === "dark" ? "🌙" : "☀️";
+  localStorage.setItem("taxa_theme", next);
+}
+
+// ─── 言語切り替え ─────────────────────────────────────────────────
+function setLang(mode) {
+  langMode = mode;
+  localStorage.setItem("taxa_lang", mode);
+  document.getElementById("btn-ja").classList.toggle("active", mode === "ja");
+  document.getElementById("btn-en").classList.toggle("active", mode === "en");
+  document.getElementById("srch").placeholder = mode === "ja" ? "検索…" : "Search…";
+  if (layoutMode === "tb") update(root); else applyLangOnly();
+}
+function applyLangOnly() {
+  g.selectAll(".nd").each(function(d) {
+    const lb = getLabels(d);
+    d3.select(this).select(".primary-lbl").text(lb.primary);
+    d3.select(this).select(".secondary-lbl").text(lb.secondary);
+  });
+}
+
+// ─── レイアウト切り替え ───────────────────────────────────────────
+function setLayout(mode) {
+  layoutMode = mode;
+  localStorage.setItem("taxa_layout", mode);
+  document.getElementById("btn-lr").classList.toggle("active", mode === "lr");
+  document.getElementById("btn-tb").classList.toggle("active", mode === "tb");
+  lay.nodeSize(layoutNodeSize());
+  update(root);
+  setTimeout(() => fitV(false), 260);
+}
+function layoutNodeSize() {
+  return layoutMode === "lr" ? [18, 200] : [110, 75];
+}
+
+// ─── 画像アイコン切り替え ────────────────────────────────────────
+function toggleIcons() {
+  showIcons = !showIcons;
+  localStorage.setItem("taxa_icons", showIcons ? "1" : "0");
+  document.getElementById("btn-icon").classList.toggle("active", showIcons);
+  update(root);
+}
+
+// ─── D3 セットアップ ─────────────────────────────────────────────
+const svg    = d3.select("#tree");
+const mainEl = document.getElementById("main");
+const zm     = d3.zoom().scaleExtent([0.01, 5])
+                 .on("zoom", e => g.attr("transform", e.transform));
+svg.call(zm).on("dblclick.zoom", null);
+const g    = svg.append("g");
+const defs = svg.append("defs");
+defs.append("marker").attr("id","arr").attr("viewBox","0 -3 7 6")
+  .attr("refX",7).attr("markerWidth",5).attr("markerHeight",5).attr("orient","auto")
+  .append("path").attr("d","M0,-3L7,0L0,3").attr("fill","var(--brd)");
+const lay  = d3.tree().nodeSize(layoutNodeSize());
+let root;
+
+const prog = (p, m) => {
+  document.getElementById("pi").style.width = p + "%";
+  if (m) document.getElementById("om").textContent = m;
+};
+
+// ─── 初期化 ─────────────────────────────────────────────────────
+function init() {
+  const savedTheme  = localStorage.getItem("taxa_theme")  || "dark";
+  const savedLayout = localStorage.getItem("taxa_layout") || "lr";
+  langMode   = localStorage.getItem("taxa_lang")   || "ja";
+  layoutMode = savedLayout;
+  showIcons  = localStorage.getItem("taxa_icons")  !== "0";
+
+  document.documentElement.setAttribute("data-theme", savedTheme);
+  document.getElementById("btn-theme").textContent = savedTheme === "dark" ? "🌙" : "☀️";
+  document.getElementById("btn-ja").classList.toggle("active", langMode === "ja");
+  document.getElementById("btn-en").classList.toggle("active", langMode === "en");
+  document.getElementById("btn-lr").classList.toggle("active", layoutMode === "lr");
+  document.getElementById("btn-tb").classList.toggle("active", layoutMode === "tb");
+  document.getElementById("btn-icon").classList.toggle("active", showIcons);
+  document.getElementById("srch").placeholder = langMode === "ja" ? "検索…" : "Search…";
+  lay.nodeSize(layoutNodeSize());
+
+  // モバイルは凡例テキストをタッチ向けに変更
+  if (isTouchDev) {
+    const hint = document.getElementById('leg-hint');
+    if (hint) hint.textContent = '▶タップで展開 ／ 長押しで詳細 ／ 種タップでWikipedia';
+  }
+
+  prog(20, "ツリー解析中…");
+  root = d3.hierarchy(DATA); root.x0 = 0; root.y0 = 0;
+  const genusIdx = RANK_ORD.indexOf("genus");
+  root.descendants().forEach(d => {
+    const ri = RANK_ORD.indexOf(d.data.rank);
+    if (ri >= genusIdx && d.children) { d._children = d.children; d.children = null; }
+  });
+  prog(50, "描画中…"); update(root); prog(85, "調整中…");
+  setTimeout(() => {
+    fitV(true); prog(100, "完了");
+    setTimeout(() => document.getElementById("ov").style.display = "none", 250);
+    updStat();
+  }, 80);
+}
+
+// ─── clipPath プール（種ごとに1つ、再生成しない） ─────────────────
+const _clipCreated = new Set();
+function ensureClip(qid) {
+  const cid = `clip-${qid}`;
+  if (_clipCreated.has(cid)) return cid;
+  _clipCreated.add(cid);
+  defs.append("clipPath").attr("id", cid)
+      .append("circle").attr("r", IMG_R);
+  return cid;
+}
+
+// ─── ツリー更新 ─────────────────────────────────────────────────
+function update(src) {
+  const W = mainEl.clientWidth, H = mainEl.clientHeight;
+  svg.attr("width", W).attr("height", H);
+  lay(root);
+  const dur = 220, tr = d3.transition().duration(dur).ease(d3.easeCubicOut);
+
+  const [sy, sx] = layoutMode === "lr"
+    ? [src.y0 ?? src.y, src.x0 ?? src.x]
+    : [src.x0 ?? src.x, src.y0 ?? src.y];
+
+  // リンク
+  const lk = g.selectAll(".lk").data(root.links(), d => d.target.data.id);
+  lk.enter().append("path").attr("class","lk").attr("d", _ => dO(sy, sx))
+    .merge(lk).transition(tr).attr("d", d => linkPath(d.source, d.target));
+  lk.exit().transition(tr)
+    .attr("d", _ => dO(layoutMode==="lr"?src.y:src.x, layoutMode==="lr"?src.x:src.y))
+    .remove();
+
+  // ノード
+  const nd = g.selectAll(".nd").data(root.descendants(), d => d.data.id);
+  const ne = nd.enter().append("g").attr("class","nd")
+    .attr("transform", _ => `translate(${sy},${sx})`)
+    .on("click", (e, d) => {
+      if (isTouchDev) return; // タッチは touchend で処理
+      const isLeaf = ["species","subspecies","variety","form"].includes(d.data.rank);
+      if (isLeaf && !d.children && !d._children) {
+        openWiki(d);
+      } else {
+        tog(d); update(d);
+      }
+      e.stopPropagation();
+    })
+    // ── マウスイベント（非タッチデバイスのみ有効） ──
+    .on("mouseover", (e, d) => { if (!isTouchDev) showTT(e, d); })
+    .on("mousemove", (e, d) => { if (!isTouchDev) movTT(e); })
+    .on("mouseout",  ()     => { if (!isTouchDev) schedulHide(); })
+    // ── タッチイベント（タッチデバイスのみ有効） ──
+    .on("touchstart", (e, d) => {
+      e.stopPropagation();
+      startLongPress(e, d);
+    }, {passive: true})
+    .on("touchend", (e, d) => {
+      e.stopPropagation();
+      endTouch(e, d);
+    })
+    .on("touchmove", (e, d) => {
+      cancelLongPress(); // スクロール中は長押し解除
+    }, {passive: true});
+
+  // 背景円
+  ne.append("circle").attr("class","bg").attr("r", 0)
+    .attr("fill",         d => RC[d.data.rank] || RC.unknown)
+    .attr("stroke",       d => RC[d.data.rank] || RC.unknown)
+    .attr("fill-opacity", d => d._children ? .35 : 1);
+
+  // 画像要素（種 + image_url があるノード）
+  ne.each(function(d) {
+    if (!d.data.image_url) return;
+    const sel = d3.select(this);
+    const cid = ensureClip(d.data.id);
+    sel.append("image").attr("class","species-img")
+      .attr("href", "")                    // 初期は空→レイジーロード
+      .attr("data-src", d.data.image_url)  // 実URLはdata-srcに保持
+      .attr("crossOrigin", "anonymous")
+      .attr("x", -IMG_R).attr("y", -IMG_R)
+      .attr("width", IMG_R*2).attr("height", IMG_R*2)
+      .attr("clip-path", `url(#${cid})`)
+      .attr("preserveAspectRatio","xMidYMid slice")
+      .attr("opacity", 0);
+    sel.append("circle").attr("class","img-ring")
+      .attr("r", 0).attr("fill","none")
+      .attr("stroke", RC[d.data.rank] || RC.unknown);
+  });
+
+  // テキスト
+  const nePri = ne.append("text").attr("class","primary-lbl")
+    .text(d => getLabels(d).primary);
+  applyPrimaryAttrs(nePri);
+  const neSec = ne.filter(d => RANK_ORD.indexOf(d.data.rank) <= RANK_ORD.indexOf("family"))
+    .append("text").attr("class","secondary-lbl")
+    .text(d => getLabels(d).secondary);
+  applySecondaryAttrs(neSec);
+
+  // マージ
+  const nm = ne.merge(nd);
+  nm.transition(tr).attr("transform", d => nodeTransform(d));
+
+  // 背景円（画像ありのとき r=0 に縮小して隠す）
+  nm.select("circle.bg").transition(tr)
+    .attr("r", d => (showIcons && d.data.image_url) ? 0 : (RR_BASE[d.data.rank] || 2))
+    .attr("fill",   d => RC[d.data.rank] || RC.unknown)
+    .attr("stroke", d => RC[d.data.rank] || RC.unknown)
+    .attr("fill-opacity", d => d._children ? .35 : 1);
+
+  // 画像フェードイン / アウト
+  nm.select("image.species-img").transition(tr)
+    .attr("opacity", d => (showIcons && d.data.image_url) ? 1 : 0);
+  nm.select("circle.img-ring").transition(tr)
+    .attr("r",       d => (showIcons && d.data.image_url) ? IMG_R + 1.5 : 0)
+    .attr("opacity", d => (showIcons && d.data.image_url) ? 0.9 : 0);
+
+  // テキスト更新
+  applyPrimaryAttrs(nm.select(".primary-lbl").text(d => getLabels(d).primary));
+  applySecondaryAttrs(nm.select(".secondary-lbl").text(d => getLabels(d).secondary));
+
+  nd.exit().transition(tr)
+    .attr("transform", _ => `translate(${layoutMode==="lr"?src.y:src.x},${layoutMode==="lr"?src.x:src.y})`)
+    .style("opacity", 0).remove();
+  root.descendants().forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+  // 再描画後: デバウンスタイマー経由で画像ロードをスケジュール
+  scheduleImageLoad();
+}
+
+// ─── レイアウト補助 ───────────────────────────────────────────────
+function nodeTransform(d) {
+  return layoutMode === "lr" ? `translate(${d.y},${d.x})` : `translate(${d.x},${d.y})`;
+}
+function linkPath(s, t) {
+  if (layoutMode === "lr") {
+    const m = (s.y + t.y) / 2;
+    return `M${s.y},${s.x}C${m},${s.x} ${m},${t.x} ${t.y},${t.x}`;
+  }
+  const m = (s.y + t.y) / 2;
+  return `M${s.x},${s.y}C${s.x},${m} ${t.x},${m} ${t.x},${t.y}`;
+}
+function dO(a, b) {
+  return layoutMode === "lr"
+    ? `M${a},${b}C${a},${b} ${a},${b} ${a},${b}`
+    : `M${b},${a}C${b},${a} ${b},${a} ${b},${a}`;
+}
+const hk  = d => d.children || d._children;
+const tog = d => {
+  if (d.children) { d._children = d.children;  d.children  = null; }
+  else            { d.children  = d._children;  d._children = null; }
+};
+function expandTo(rank) {
+  const ti = RANK_ORD.indexOf(rank); if (ti < 0) return;
+  root.descendants().forEach(d => {
+    const di = RANK_ORD.indexOf(d.data.rank);
+    if (di < ti && d._children) { d.children  = d._children; d._children = null; }
+    if (di >= ti && d.children) { d._children = d.children;  d.children  = null; }
+  });
+  update(root); updStat();
+}
+function collapseAll() {
+  root.descendants().forEach(d => {
+    if (d.depth > 0 && d.children) { d._children = d.children; d.children = null; }
+  });
+  update(root);
+}
+function fitV(instant) {
+  const W = mainEl.clientWidth, H = mainEl.clientHeight;
+  const bb = g.node().getBBox();
+  if (!bb.width || !bb.height) return;
+  const sc = Math.min(W / (bb.width + 80), H / (bb.height + 80), 1.2);
+  const t  = d3.zoomIdentity
+    .translate(W/2 - sc*(bb.x + bb.width/2), H/2 - sc*(bb.y + bb.height/2)).scale(sc);
+  if (instant) svg.call(zm.transform, t);
+  else         svg.transition().duration(500).call(zm.transform, t);
+}
+function updStat() {
+  const d  = root.descendants();
+  const sp = d.filter(x => x.data.rank === "species").length;
+  const ge = d.filter(x => x.data.rank === "genus").length;
+  const fa = d.filter(x => x.data.rank === "family").length;
+  const im = d.filter(x => x.data.image_url).length;
+  document.getElementById("stat").innerHTML =
+    `<span><span class="sd" style="background:var(--c-species)"></span>${sp.toLocaleString()}種</span>`+
+    `<span><span class="sd" style="background:var(--c-genus)"></span>${ge.toLocaleString()}属</span>`+
+    `<span><span class="sd" style="background:var(--c-family)"></span>${fa.toLocaleString()}科</span>`+
+    (im ? `<span style="color:var(--txt3);font-size:10px">📷${im.toLocaleString()}</span>` : "");
+}
+const cntSp = d => {
+  if (!d.children && !d._children)
+    return ["species","subspecies","variety","form"].includes(d.data.rank) ? 1 : 0;
+  return (d.children ?? d._children ?? []).reduce((s, c) => s + cntSp(c), 0);
+};
+
+// ─── 検索 ─────────────────────────────────────────────────────────
+// _children を含むツリー全ノードを走査するヘルパー
+function walkAll(node, fn) {
+  fn(node);
+  const kids = node.children || node._children || [];
+  kids.forEach(c => walkAll(c, fn));
+}
+
+function doSrch(q) {
+  const v = q.trim().toLowerCase();
+  // ハイライトをリセット
+  g.selectAll(".nd").classed("nh", false).classed("nm", false);
+  if (!v) {
+    // 空文字ならリセットのみ
+    update(root);
+    return;
+  }
+
+  const hit      = new Set(); // ヒットノードおよびその祖先
+  const hitDirect = new Set(); // ヒットしたノード自身
+
+  // _children を含む全ノードを走査
+  walkAll(root, d => {
+    const name = (d.data.name || "").toLowerCase();
+    const ja   = (d.data.ja   || "").toLowerCase();
+    if (name.includes(v) || ja.includes(v)) {
+      hitDirect.add(d.data.id);
+      hit.add(d.data.id);
+      // 祖先パスをすべて展開してマーク
+      let p = d.parent;
+      while (p) {
+        hit.add(p.data.id);
+        // 折りたたまれていたら展開
+        if (p._children) {
+          p.children  = p._children;
+          p._children = null;
+        }
+        p = p.parent;
+      }
+    }
+  });
+
+  // ヒットしたノードの子孫も展開（ヒットノード自体の下も見せる）
+  walkAll(root, d => {
+    if (hitDirect.has(d.data.id) && d._children) {
+      d.children  = d._children;
+      d._children = null;
+    }
+  });
+
+  // ツリーを再描画してハイライトを適用
+  update(root);
+
+  g.selectAll(".nd")
+    .classed("nh", d => hitDirect.has(d.data.id))
+    .classed("nm", d => !hit.has(d.data.id));
+
+  // ヒットノードが画面内に入るよう自動フィット
+  if (hit.size > 0) {
+    setTimeout(() => fitV(false), 260);
+  }
+}
+
+// ─── 画像レイジーロード（ズーム閾値 + デバウンス + レートキュー）─────
+//
+// 3段構えで Wikimedia CDN への 429 を防ぐ
+//
+//  段1: ズーム閾値
+//       scale < IMG_ZOOM_MIN の場合はリクエストしない
+//       （全体俯瞰中にノードが小さすぎる→画像不要）
+//
+//  段2: デバウンス
+//       ズーム倍率が変わってから IMG_DEBOUNCE_MS ms 後に処理開始
+//       ドラッグ・ピンチ操作中は何もしない
+//
+//  段3: レートリミットキュー
+//       IMG_RATE_PER_SEC リクエスト/秒 に上限を設ける
+//       キューに積んで順次送出
+
+const IMG_ZOOM_MIN    = 0.35;   // この倍率未満では画像ロードしない
+const IMG_DEBOUNCE_MS = 1500;   // ズーム操作停止後に待つ時間(ms)
+const IMG_RATE_PER_SEC = 4;     // 1秒あたりの最大リクエスト数
+
+// ── キュー本体 ────────────────────────────────────────────────────
+const _imgQueue   = [];         // 未ロード URL のキュー [{el, src}]
+let   _queueTimer = null;       // キュー処理のインターバルタイマー
+
+function _startQueue() {
+  if (_queueTimer) return;
+  _queueTimer = setInterval(() => {
+    if (_imgQueue.length === 0) {
+      clearInterval(_queueTimer);
+      _queueTimer = null;
+      return;
+    }
+    // 1 tick に IMG_RATE_PER_SEC 件まで送出
+    const batch = _imgQueue.splice(0, IMG_RATE_PER_SEC);
+    batch.forEach(({el, src}) => {
+      if (!el.attr("href")) el.attr("href", src);
+    });
+  }, 1000);
+}
+
+function _enqueueVisible() {
+  const t       = d3.zoomTransform(svg.node());
+  const scale   = t.k;
+  const svgRect = mainEl.getBoundingClientRect();
+
+  // 段1: ズーム閾値チェック
+  if (scale < IMG_ZOOM_MIN) return;
+
+  g.selectAll("image.species-img").each(function() {
+    const el  = d3.select(this);
+    const src = el.attr("data-src");
+    if (!src || el.attr("href")) return; // ロード済み or URL なし
+    // 既にキューに入っているか確認
+    if (_imgQueue.some(q => q.src === src)) return;
+
+    // ノード座標 → 画面座標に変換
+    const parent = this.parentNode;
+    if (!parent) return;
+    const nd = d3.select(parent).datum();
+    if (!nd) return;
+    const sx = layoutMode === "lr" ? nd.y : nd.x;
+    const sy = layoutMode === "lr" ? nd.x : nd.y;
+    const px = t.applyX(sx);
+    const py = t.applyY(sy);
+
+    // 画面内（マージン付き）のノードをキューに追加
+    const margin = 100;
+    if (px > -margin && px < svgRect.width  + margin &&
+        py > -margin && py < svgRect.height + margin) {
+      _imgQueue.push({el, src});
+    }
+  });
+
+  _startQueue();
+}
+
+// ── デバウンスラッパー ────────────────────────────────────────────
+let _imgDebounce = null;
+
+function scheduleImageLoad() {
+  clearTimeout(_imgDebounce);
+  _imgDebounce = setTimeout(_enqueueVisible, IMG_DEBOUNCE_MS);
+}
+
+// zoom 変化時: デバウンスタイマーをリセット
+zm.on("zoom.lazyimg",  () => clearTimeout(_imgDebounce));
+// zoom 終了時: デバウンス開始
+zm.on("end.lazyimg",   scheduleImageLoad);
+
+// ─── デバイス判定 ───────────────────────────────────────────────
+const isTouchDev = window.matchMedia('(pointer: coarse)').matches;
+
+// ─── Wikipedia リンク ────────────────────────────────────────────
+function openWiki(d) {
+  // 言語モードに応じて Wikipedia URL を構築
+  // 学名・和名で直接 Wikipedia を開き、存在しない場合は Wikidata にフォールバック
+  const sci = encodeURIComponent(d.data.name || "");
+  const ja  = encodeURIComponent(d.data.ja   || "");
+  const wikiUrl = langMode === "ja" && d.data.ja
+    ? `https://ja.wikipedia.org/wiki/${ja}`
+    : `https://en.wikipedia.org/wiki/${sci}`;
+  window.open(wikiUrl, "_blank", "noopener");
+}
+
+// ─── ツールチップ（画像対応） ─────────────────────────────────────
+const tt = document.getElementById("tt");
+let currentTTNode = null;
+let _hideTimer = null;
+
+function schedulHide() {
+  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 220);
+}
+function cancelHide() {
+  if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
+}
+// ツールチップ上にマウスが来たら非表示タイマーをキャンセル
+tt.addEventListener("mouseenter", cancelHide);
+tt.addEventListener("mouseleave", schedulHide);
+
+// ─── 長押し（タッチデバイス） ────────────────────────────────────
+let _lpTimer  = null;   // 長押しタイマー
+let _lpFired  = false;  // 長押し発火フラグ
+let _lpNode   = null;   // 対象ノード
+const LP_MS   = 480;    // 長押し判定時間（ms）
+
+function startLongPress(e, d) {
+  cancelLongPress();
+  _lpFired = false;
+  _lpNode  = d;
+  // 長押しフィードバック（ノードにクラス付与）
+  d3.select(e.currentTarget).classed('pressing', true);
+  _lpTimer = setTimeout(() => {
+    _lpFired = true;
+    d3.select(e.currentTarget).classed('pressing', false);
+    // タッチ座標からツールチップを表示
+    const touch = e.touches ? e.touches[0] : e;
+    showTTTouch(d);
+  }, LP_MS);
+}
+
+function cancelLongPress() {
+  if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+  if (_lpNode) {
+    g.selectAll('.nd').classed('pressing', false);
+  }
+}
+
+function endTouch(e, d) {
+  cancelLongPress();
+  if (_lpFired) return; // 長押し処理済み → 短タップ扱いにしない
+  // 短タップ: 展開 or Wikipedia
+  const isLeaf = ['species','subspecies','variety','form'].includes(d.data.rank);
+  if (isLeaf && !d.children && !d._children) {
+    openWiki(d);
+  } else {
+    tog(d); update(d);
+  }
+}
+
+// モバイル用ツールチップ表示（位置は画面下部固定のため座標不要）
+function showTTTouch(d) {
+  // showTT の座標計算部分を除いて呼び出す
+  const fakeEvt = { clientX: 0, clientY: 0 }; // movTT は @media で無視される
+  showTT(fakeEvt, d);
+  // モバイルではCSSで bottom 固定にするため left/top 上書きをリセット
+  tt.style.left = '';
+  tt.style.top  = '';
+}
+
+// 画面タップでツールチップを閉じる（ノード以外の領域）
+mainEl.addEventListener('touchstart', (e) => {
+  if (!tt.contains(e.target) && !e.target.closest('.nd')) {
+    tt.style.display = 'none';
+  }
+}, {passive: true});
+function showTT(e, d) {
+  const lb = getLabels(d);
+  const ch = (d.children ?? d._children ?? []).length;
+  document.getElementById("tt-rank").textContent = RJ[d.data.rank] || d.data.rank;
+  document.getElementById("tt-name").textContent = lb.primary;
+  document.getElementById("tt-ja").textContent   = lb.secondary;
+  document.getElementById("tt-cnt").textContent  = ch ? `直下: ${ch}件` : "";
+
+  const imgEl    = document.getElementById("tt-img");
+  const phEl     = document.getElementById("tt-ph");
+  const creditEl = document.getElementById("tt-credit");
+
+  if (d.data.image_url) {
+
+    // Special:FilePath?width= 方式: width値を220に差し替え
+    // Wikimedia API URL の w= パラメータと Special:FilePath の width= 両方に対応
+    // 250px は Wikimedia 標準サイズ（220px は非標準で 429 になる）
+    const large = d.data.image_url
+      .replace(/\/\d+px-/, '/250px-')           // CDN thumb URL
+      .replace(/[?&]width=\d+/, '?width=250');  // Special:FilePath URL
+    imgEl.src = large;
+    imgEl.classList.remove("hidden");
+    phEl.classList.add("hidden");
+    creditEl.textContent = "© Wikimedia Commons";
+  } else {
+    imgEl.classList.add("hidden");
+    phEl.classList.remove("hidden");
+    phEl.textContent = ["species","subspecies"].includes(d.data.rank) ? "🐦"
+                     : d.data.rank === "genus" ? "🔬" : "🌿";
+    creditEl.textContent = "";
+  }
+  // Wikipedia ボタン（種・亜種・変種・品種のみ表示）
+  const isLeaf = ["species","subspecies","variety","form"].includes(d.data.rank);
+  const wikiDiv = document.getElementById("tt-wiki");
+  const wikiBtn = document.getElementById("tt-wiki-btn");
+  if (isLeaf) {
+    wikiBtn.textContent = langMode === "ja" ? "Wikipedia で開く ↗" : "Open in Wikipedia ↗";
+    wikiDiv.style.display = "block";
+  } else {
+    wikiDiv.style.display = "none";
+  }
+  currentTTNode = d;
+  tt.style.display = "block";
+  movTT(e);
+}
+function movTT(e) {
+  const r  = mainEl.getBoundingClientRect();
+  const tx = e.clientX - r.left;
+  const ty = e.clientY - r.top;
+  const left = (tx + 235 > r.width) ? tx - 238 : tx + 14;
+  tt.style.left = left + "px";
+  tt.style.top  = Math.min(ty - 10, r.height - 270) + "px";
+}
+
+let rsz;
+window.addEventListener("resize", () => {
+  clearTimeout(rsz);
+  rsz = setTimeout(() => {
+    svg.attr("width", mainEl.clientWidth).attr("height", mainEl.clientHeight);
+  }, 200);
+});
+window.addEventListener("load", init);
+</script></body></html>
