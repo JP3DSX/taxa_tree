@@ -1138,6 +1138,13 @@ def make_index_html(output_dir) -> str:
     # タイトル等のプレースホルダ → SPA ルーターが動的に設定
     # window.addEventListener("load", init) は SPA ルーターが制御するため削除
     viewer_body = viewer_body.replace('window.addEventListener("load", init);', "")
+    # #loading は SPA ルーターが管理するため viewer_body から除去（二重 id 防止）
+    import re as _re2
+    viewer_body = _re2.sub(
+        r'<div id="loading"[^>]*>.*?</div>\s*', "", viewer_body, flags=_re2.DOTALL)
+    # #ov（スタンドアロン用の初期化オーバーレイ）も SPA では不要なため除去
+    viewer_body = _re2.sub(
+        r'<div id="ov"[^>]*>.*?</div>\s*', "", viewer_body, flags=_re2.DOTALL)
     viewer_body = viewer_body.replace("__TITLE__", "").replace("__QID__", "").replace("__DATE__", date)
 
     # ── SPA HTML を組み立て ────────────────────────────────────────
@@ -1147,6 +1154,7 @@ def make_index_html(output_dir) -> str:
         '<meta charset=\"UTF-8\">\n'
         '<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n'
         "<title>系統図</title>\n"
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>\n'
         "<style>\n"
         + _spa_css(viewer_css)
         + "\n</style></head><body>\n"
@@ -1248,7 +1256,7 @@ def _spa_viewer(viewer_body: str, date: str) -> str:
 
 def _spa_scripts(taxa_js: str, date: str) -> str:
     return (
-        '<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>\n'
+        # D3 は <head> で読み込み済みのためここでは不要
         "<script>\n"
         f"const TAXA_LIST = {taxa_js};\n"
         + _SPA_JS.replace("__DATE__", date)
