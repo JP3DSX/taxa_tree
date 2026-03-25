@@ -266,7 +266,13 @@ svg{width:100%;height:100%}
     <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>
     <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亚種</div>
     <span id="leg-hint" style="margin-left:7px">▶クリックで展開 ／ ドラッグ・ホイールでナビ</span>
+  <div id="leg-sizer">
+    <label>⇔ TT</label>
+    <input type="range" id="tt-size-slider"
+      min="180" max="420" step="10" value="280"
+      oninput="setTTWidth(+this.value)">
   </div>
+</div>
   <div id="main">
     <svg id="tree"></svg>
     <div id="tt">
