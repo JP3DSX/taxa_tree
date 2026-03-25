@@ -14,11 +14,11 @@ Wikidata SPARQL API から任意の分類群を BFS（幅優先探索）で取�
 3. [インストール](#インストール)
 4. [使い方](#使い方)
 5. [出力モード](#出力モード)
-6. [出力ファイルの構成](#出力ファイルの構成)
-7. [HTML の操作方法](#html-の操作方法)
+6. [HTML の操作方法](#html-の操作方法)
+7. [調整項目リファレンス](#調整項目リファレンス)
 8. [コード構成](#コード構成)
 9. [バージョン履歴](#バージョン履歴)
-10. [既知の制約と改善候補](#既知の制約と改善候補)
+10. [既知の制約](#既知の制約)
 11. [参考文献](#参考文献)
 
 ---
@@ -27,7 +27,7 @@ Wikidata SPARQL API から任意の分類群を BFS（幅優先探索）で取�
 
 - **対応範囲**: 鳥類・哺乳類・植物・昆虫・魚類・菌類など生物分類全般
 - **データソース**: [Wikidata](https://www.wikidata.org/) / [Wikimedia Commons](https://commons.wikimedia.org/)
-- **出力**: `result/` フォルダに HTML + キャッシュ JSON + SPA ランディングページ
+- **出力**: `result/` フォルダに SPA (`index.html`) + キャッシュ JSON
 - **依存ライブラリ**: `requests`（`pip install requests`）のみ
 
 ---
@@ -36,28 +36,23 @@ Wikidata SPARQL API から任意の分類群を BFS（幅優先探索）で取�
 
 ```
 プロジェクトフォルダ/
-├── taxa_tree.py                    エントリポイント（引数解析・保存制御）
+├── taxa_tree.py                    エントリポイント
 ├── README.md                       このファイル
 ├── .github/workflows/pages.yml     GitHub Pages 自動デプロイ
 ├── module/
-│   ├── __init__.py                 パッケージ宣言
-│   ├── taxa_fetch.py               データ取得・モデル構築（FETCH_VERSION = 1.7）
+│   ├── __init__.py
+│   ├── taxa_fetch.py               データ取得（FETCH_VERSION = 1.7）
 │   └── taxa_html.py                HTML生成・UI（HTML_VERSION = 1.5）
-└── result/                         出力先（実行時に自動作成）
+└── result/
     ├── taxa_cache_Q25341.json       キャッシュ JSON
-    ├── taxa_スズメ目_Q25341.html    系統図 HTML（standalone モードのみ）
     └── index.html                   SPA（ランディング + ビューワー統合）
 ```
 
-### 各ファイルの責務
-
 | ファイル | 行数 | 責務 |
 |---|---|---|
-| `taxa_tree.py` | 724行 | 引数解析・モード切替・キャッシュ管理・HTML保存・一括処理 |
-| `module/taxa_fetch.py` | 1,078行 | SPARQL・BFS・子補完・進捗バー・接続診断 |
-| `module/taxa_html.py` | 1,360行 | HTML テンプレート・SPA生成・`make_html()` 等 |
-
-**UI 変更時は `module/taxa_html.py` のみを編集すればよく、`module/taxa_fetch.py` のレビューは不要です。**
+| `taxa_tree.py` | 724行 | 引数解析・モード切替・キャッシュ管理 |
+| `module/taxa_fetch.py` | 1,078行 | SPARQL・BFS・子補完・接続診断 |
+| `module/taxa_html.py` | 1,195行 | HTML テンプレート・SPA生成 |
 
 ---
 
@@ -72,7 +67,7 @@ pip install requests
 ## 使い方
 
 ```bat
-:: 接続診断（初回・社内プロキシ環境では必須）
+:: 接続診断（初回・プロキシ環境では必須）
 python taxa_tree.py --test
 
 :: 通常取得
@@ -83,15 +78,15 @@ python taxa_tree.py --taxon "カラス科"    # 名前で検索
 :: web モード（GitHub Pages 用・JSON 分離）
 python taxa_tree.py --qid Q25341 --web
 
-:: HTML のみ再生成（fetch をスキップ）
+:: HTML のみ再生成
 python taxa_tree.py --qid Q25341 --render
-python taxa_tree.py --qid Q25341 --render --web
+python taxa_tree.py --render              # 最新キャッシュを自動選択
 
 :: 一括再生成
-python taxa_tree.py --render-all           # standalone: 全キャッシュを HTML に再変換
-python taxa_tree.py --render-all --web     # web: 余分な HTML を削除 + index.html 再生成
+python taxa_tree.py --render-all          # standalone: 全キャッシュを HTML 変換
+python taxa_tree.py --render-all --web    # web: 余分 HTML 削除 + index.html 再生成
 
-:: 連絡先メールを User-Agent に設定（Wikimedia 推奨）
+:: Wikimedia 推奨: 連絡先メールを User-Agent に設定
 python taxa_tree.py --email you@example.com --qid Q25341
 set TAXA_CONTACT_EMAIL=you@example.com
 ```
@@ -100,154 +95,49 @@ set TAXA_CONTACT_EMAIL=you@example.com
 
 | 引数 | デフォルト | 説明 |
 |---|---|---|
-| `--qid QID` | — | Wikidata QID を直接指定 |
+| `--qid QID` | — | Wikidata QID（例: Q25341） |
 | `--taxon NAME` | — | 学名・和名で検索（排他グループ） |
-| `--render` | — | fetch をスキップし HTML のみ再生成。`--qid` で対象キャッシュを指定可（排他グループ） |
-| `--render-all` | — | 一括再生成（排他グループ。`--qid`/`--taxon` と同時使用不可） |
-| `--cached` | — | `--render` の後方互換エイリアス（排他グループ） |
-| `--test` | — | 接続診断のみ実行（排他グループ） |
+| `--render` | — | HTML のみ再生成。`--qid` で対象指定可（排他グループ） |
+| `--render-all` | — | 一括再生成（`--qid`/`--taxon` と同時使用不可） |
+| `--cached` | — | `--render` の後方互換エイリアス |
+| `--test` | — | 接続診断のみ実行 |
 | `--web` | false | web モード: JSON を外部ファイルに分離（GitHub Pages 用） |
 | `--split RANK` | `family` | Phase 1/2 の分割ランク |
 | `--stop RANK` | `species` | 取得の終端ランク |
 | `--fast` | false | Phase 1（`--split` まで）で終了 |
-| `--output FILE` | 自動生成 | 出力 HTML ファイルパスを明示指定 |
+| `--output FILE` | 自動生成 | 出力 HTML ファイルパス |
 | `--proxy URL` | 環境変数 | プロキシ URL |
-| `--email EMAIL` | 環境変数 | User-Agent に埋め込む連絡先メール（`TAXA_CONTACT_EMAIL` 環境変数でも可） |
-
-### 動作モード一覧
-
-| モード | コマンド例 | fetch | HTML生成 |
-|---|---|---|---|
-| 新規取得 | `--qid Q25341` | ✅ | ✅ 単体 |
-| HTML 再生成 | `--qid Q25341 --render` | スキップ | ✅ 単体 |
-| **一括再生成（standalone）** | `--render-all` | スキップ | ✅ **全件** |
-| **一括再生成（web）** | `--render-all --web` | スキップ | index.html のみ再生成 |
-| 高速取得 | `--qid Q25341 --fast` | ✅ Phase1のみ | ✅ 単体 |
-| 接続診断 | `--test` | スキップ | スキップ |
+| `--email EMAIL` | 環境変数 | User-Agent に埋め込む連絡先（`TAXA_CONTACT_EMAIL` でも可） |
 
 ---
 
 ## 出力モード
 
-HTML の生成方式を2つから選択できます。
-
 ### standalone モード（デフォルト）
 
-JSON データを HTML に直接埋め込みます。
+JSON を HTML に埋め込む。`file://` でローカル動作可・オフライン閲覧可。
 
 ```bat
 python taxa_tree.py --qid Q25341
 ```
 
-```
-result/
-  taxa_スズメ目_Q25341.html   ← JSON 埋め込み（数MB）
-  index.html                   ← SPA（カード一覧 + ビューワー）
-```
-
-| 項目 | 内容 |
-|---|---|
-| ローカル動作 | ✅ `file://` で直接開ける・オフライン可 |
-| GitHub Pages | ✅ |
-| ファイルサイズ | 大（JSON + HTML 混在） |
-| UI 更新 | `--render` または `--render-all` が必要 |
-
 ### web モード（GitHub Pages 推奨）
 
-JSON を外部ファイルとして分離し、HTML は軽量な描画エンジンのみにします。
+JSON を外部ファイルに分離。HTML は ~45KB の SPA のみ。`file://` では CORS のため動作不可。
 
 ```bat
 python taxa_tree.py --qid Q25341 --web
 ```
 
-```
-result/
-  taxa_cache_Q25341.json       ← JSON（既存・追加取得不要）
-  index.html                   ← SPA（カード一覧 + ビューワー）
-  ※ taxa_*.html は生成されない（または自動削除される）
-```
-
-| 項目 | 内容 |
-|---|---|
-| ローカル動作 | ❌ CORS のため `file://` では動作しない |
-| GitHub Pages | ✅ |
-| ファイルサイズ | 小（HTML は SPA の index.html のみ） |
-| UI 更新 | `--render-all --web` のみで即反映（JSON 再取得不要） |
-
-web モードでは、ブラウザが JSON を読み込む間**プログレスバー付きローディング画面**が表示されます。
-
 ### SPA ランディングページ（index.html）
-
-どちらのモードでも `index.html` は自動生成・更新されます。
 
 ```
 URL                  表示
-index.html        →  カード一覧（全キャッシュのサムネイル）
+index.html        →  カード一覧
 index.html#Q25341 →  スズメ目の系統図ビューワー
-index.html#Q10908 →  哺乳綱の系統図ビューワー
 ```
 
-カードをクリックするとページ遷移なしで系統図ビューワーに切り替わります。ブラウザの「戻る」ボタンで一覧に戻れます。
-
----
-
-## 出力ファイルの構成
-
-### 出力フォルダの変更
-
-`taxa_tree.py` **L62** の `OUTPUT_DIR` を変更するだけで全出力先が変わります。
-
-```python
-OUTPUT_DIR = "result"   # ← ここを変更するだけ
-OUTPUT_DIR = "docs"     # GitHub Pages 標準構成
-```
-
-### キャッシュの _meta フィールド
-
-取得時に自動記録されます。`--render` 実行時にコンソールで確認できます。
-
-```json
-{
-  "_meta": {
-    "fetch_version": "1.7",
-    "fetched_at":    "2026-03-25T10:00:00",
-    "split_rank":    "family",
-    "stop_rank":     "species"
-  }
-}
-```
-
-`fetch_version` が `1.4` 未満のキャッシュは `image_url` が含まれていないため再取得を推奨します。
-
-### GitHub Pages 自動デプロイ（GitHub Actions）
-
-```yaml
-# .github/workflows/pages.yml
-name: Deploy result/ to GitHub Pages
-on:
-  push:
-    branches: ["main"]
-    paths: ["result/**"]
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: result
-      - id: deployment
-        uses: actions/deploy-pages@v4
-```
-
-Settings → Pages → Source を **「GitHub Actions」** に設定。
+カードをクリックするとページ遷移なしでビューワーに切り替わります。「← 一覧」ボタンまたはブラウザの戻るボタンで一覧に戻れます。
 
 ---
 
@@ -258,46 +148,135 @@ Settings → Pages → Source を **「GitHub Actions」** に設定。
 | 操作 | 動作 |
 |---|---|
 | ノードにマウスオーバー | ツールチップ表示（画像・学名・種数） |
-| 種ノードのクリック | Wikipedia を新しいタブで開く |
-| 属・科など上位ノードのクリック | 展開 / 折りたたみ |
+| 種ノードをクリック | Wikipedia を新しいタブで開く |
+| 上位ノードをクリック | 展開 / 折りたたみ |
 | ドラッグ / ホイール | 移動 / ズーム |
 
 ### スマートフォン（タッチ）
 
 | 操作 | 動作 |
 |---|---|
-| ノードを**長押し**（約0.5秒） | ツールチップ表示（画面下部中央固定） |
-| 種ノードを**短タップ** | Wikipedia を新しいタブで開く |
-| 属・科など上位ノードを**短タップ** | 展開 / 折りたたみ |
+| ノードを長押し（約0.5秒） | ツールチップ表示 |
+| 種ノードを短タップ | Wikipedia を開く |
+| 上位ノードを短タップ | 展開 / 折りたたみ |
 | ✕ または背景タップ | ツールチップを閉じる |
-| ドラッグ / ピンチ | 移動 / ズーム |
 
 ### ヘッダーボタン
 
 | ボタン | 機能 | 設定保存 |
 |---|---|---|
-| 🌙 / ☀️ | ダーク / ライトテーマ | `localStorage` |
-| JA / EN | 日本語 / 英語優先 | `localStorage` |
-| LR / TB | 左→右 / 上→下レイアウト | `localStorage` |
-| 🖼 | 種ノード画像アイコン ON/OFF | `localStorage` |
+| 🌙 / ☀️ | テーマ切り替え | localStorage |
+| JA / EN | 言語切り替え | localStorage |
+| LR / TB | レイアウト切り替え | localStorage |
+| 🖼 | 画像アイコン ON/OFF | localStorage |
 | 科まで / 属まで / 全展開 / 折りたたむ | ツリー操作 | — |
 | 全体表示 | ズームリセット | — |
 
 ### 検索
 
-検索ボックスに入力後、**🔍 ボタン**または **Enter キー**で実行します（リアルタイム検索は無効・大量データでのクラッシュ防止）。✕ ボタンでクリア。折りたたまれた状態でも全ノードを対象に検索し、ヒット時は自動展開・自動フィットします。
+🔍 ボタンまたは Enter で実行（リアルタイム検索は無効）。折りたたみ状態でも全ノードを走査し、ヒット時は自動展開・自動フィットします。✕ ボタンでクリア。
+
+### 凡例バー
+
+| 表示 | 意味 |
+|---|---|
+| 通常色 | Wikidata P171 で取得 |
+| 橙リング | P171+ 推移的補完（亜属経由） |
+| 赤破線 | データ不完全（全手段失敗） |
+| 凡例右端スライダー `↔ TT` | ツールチップ幅を調整（localStorage に保存） |
 
 ### Wikipedia リンク
 
-すべてのランク（属・科・目など）のツールチップに「Wikipedia で開く ↗」ボタンが表示されます。JA モードで和名がある場合、日本語版の存在を確認してから開きます（存在しない場合は英語版にフォールバック）。
+すべてのランクのツールチップに「Wikipedia で開く ↗」ボタンが表示されます。JA モードで和名がある場合は日本語版の存在を API で確認し、なければ英語版を開きます。
 
-### 凡例
+---
 
-| 凡例色 | 意味 |
-|---|---|
-| 通常色 | Wikidata P171 で取得 |
-| 橙リング 🔤 | P171+ 推移的補完（亜属経由を捕捉） |
-| 赤破線 ⚠ | データ不完全（全手段失敗） |
+## 調整項目リファレンス
+
+`module/taxa_html.py` の定数と設定項目の一覧です。
+
+---
+
+### 画像レイジーロード（`taxa_html.py` L744–746）
+
+```javascript
+const IMG_ZOOM_MIN     = 0.35;   // この倍率未満では画像ロードしない
+const IMG_DEBOUNCE_MS  = 1500;   // ズーム操作停止後に待つ時間 (ms)
+const IMG_RATE_PER_SEC = 4;      // 1秒あたりの最大リクエスト数
+```
+
+| 定数 | デフォルト | 調整のヒント |
+|---|---|---|
+| `IMG_ZOOM_MIN` | `0.35` | 小さくすると俯瞰時も画像表示（通信量増） |
+| `IMG_DEBOUNCE_MS` | `1500` ms | 小さくすると素早く表示（サーバー負荷増） |
+| `IMG_RATE_PER_SEC` | `4` 件/秒 | 大きくすると速い（Wikimedia 429 エラーのリスク増） |
+
+---
+
+### ツールチップ挙動（`taxa_html.py` L882–897）
+
+```javascript
+// ノードを離れてからツールチップが消えるまでの猶予
+_hideTimer = setTimeout(() => { tt.style.display = "none"; }, 300);
+
+// ツールチップ近傍（この px 以内を移動中は hide をキャンセル）
+const margin = 10;
+```
+
+| 設定 | デフォルト | 調整のヒント |
+|---|---|---|
+| hide delay | `450` ms | 大きくすると消えにくい（ツールチップに移りやすい）、小さくすると素早く消える |
+| 近傍マージン | `15` px | 大きくすると消えにくい。小さくすると意図しないキャンセルが減る |
+
+---
+
+### ツールチップサイズ（ブラウザ UI / `taxa_html.py` L230・L859）
+
+凡例バー右端の `↔ TT` スライダーで操作します。設定は localStorage に保存されます。
+
+| 設定 | デフォルト | 範囲 |
+|---|---|---|
+| ツールチップ幅 | `280` px | `180`〜`420` px（10 px 刻み） |
+
+コードで初期値を変更したい場合:
+
+```javascript
+// L859: JavaScript 側の初期値
+let _ttW = parseInt(localStorage.getItem("taxa_tt_w") || "280");
+
+// L230: スライダーの HTML 属性
+min="180" max="420" step="10" value="280"
+```
+
+---
+
+### タッチ長押し判定（`taxa_html.py` L908）
+
+```javascript
+const LP_MS = 480;    // 長押しとして認識するまでの時間 (ms)
+```
+
+| 定数 | デフォルト | 調整のヒント |
+|---|---|---|
+| `LP_MS` | `480` ms | 短くすると反応が早い。長くすると誤タップが減る |
+
+---
+
+### 取得速度（`taxa_fetch.py` L684 付近）
+
+```python
+time.sleep(0.8)   # SPARQL リクエスト間の待機時間（秒）
+```
+
+Wikidata の負荷軽減のための固定値。短くすると取得が速くなりますがレートリミットに引っかかる可能性があります。
+
+---
+
+### 出力フォルダ（`taxa_tree.py` L62）
+
+```python
+OUTPUT_DIR = "result"   # ← ここを変更するだけで全出力先が変わる
+```
 
 ---
 
@@ -308,23 +287,16 @@ Settings → Pages → Source を **「GitHub Actions」** に設定。
 ```
 OUTPUT_DIR = "result"  ← 出力先の唯一の設定箇所（L62）
 
-_print_meta(tree)               キャッシュ _meta を表示
-_load_cache(qid)                キャッシュ読み込み（QID指定 or 最新自動選択）
-_cleanup_html(output_dir)       taxa_*.html を全削除（web モード用）
-_save_html(tree, out, web)      HTML生成・保存・index.html 自動更新
-                                web=True のとき _cleanup_html() も実行
-_render_all(web_mode)           一括再生成
-  web=False: 全キャッシュ → make_html() → taxa_*.html + index.html
-  web=True:  _cleanup_html() → make_index_html() → index.html のみ
+_print_meta(tree)           キャッシュ _meta を表示
+_load_cache(qid)            キャッシュ読み込み（QID指定 or 最新自動選択）
+_cleanup_html(output_dir)   taxa_*.html を全削除（web モード用）
+_save_html(tree, out, web)  HTML生成・保存・index.html 自動更新
+_render_all(web_mode)       一括再生成
 
 main()
   排他グループ: --taxon / --render / --render-all / --cached / --test
-  ├── --test       → init_session → run_test()
-  ├── --render-all → _render_all(web=args.web)
-  ├── --render     → _load_cache() → _save_html(web=args.web)
-  └── 新規取得     → init_session → fetch_root_info
-                  → fetch_phase1 → fetch_phase2 → キャッシュ保存
-                  → _save_html(web=args.web)
+  --render-all + --web: _cleanup_html → make_index_html
+  --render-all        : 全キャッシュ → make_html × N → make_index_html
 ```
 
 ### module/taxa_fetch.py（1,078行）
@@ -337,130 +309,116 @@ init_session(proxy, email)
   環境変数 TAXA_CONTACT_EMAIL でも設定可
 
 resolve_image_url(filename, width)
-  MD5計算のみ（HTTP リクエストなし）・SVG/TIF → .png
+  MD5計算のみ（HTTP リクエストなし）
+  SVG/TIF/WEBP → .png サムネイルを要求
 
-子ノード補完（属ノードの子が0件のとき自動適用）
-  get_children_with_supplement(parent_node, visited, stop_rank)
+子ノード補完（属ノードの子が0件のとき自動適用）:
   ① Wikidata P171 直接
   ② P171+ 推移的閉包（亜属経由の種を一括捕捉）
-  ③ 全手段失敗 → STRATEGY_INCOMPLETE
+  ③ 全手段失敗 → STRATEGY_INCOMPLETE（赤破線）
 
-  重複防止:
-    visited |= nodes_dict.keys()  ← 科をまたいだ重複を排除
-    node["id"] in nodes_dict チェック（二重ガード）
+重複防止:
+  visited |= nodes_dict.keys()  ← 科をまたいだ重複を排除
 
-fetch_phase2 進捗バー:
+進捗バー:
   バー・%: 科数ベース（確定値）
   右側:    種数（参考表示）
 ```
 
-### module/taxa_html.py（1,360行）
+### module/taxa_html.py（1,195行）
 
 ```
 HTML_VERSION = "1.5"
 
-make_html(tree, root_qid)
-  standalone モード: const DATA={...JSON...}; を HTML に埋め込む
+make_html(tree, root_qid)             standalone: const DATA={...JSON...};
+make_web_viewer(tree, qid, json_file) web: fetch(json) → init()
+make_index_html(output_dir)           SPA index.html 生成
+  DOM 構造は _SPA_HEAD 定数で直接定義
+  テンプレートから CSS・JS のみを抽出して再利用
+  プレースホルダは __KEY__ 形式で .replace() で差し込む
 
-make_web_viewer(tree, root_qid, json_filename)
-  web モード: fetch(json_filename) → init() を HTML に埋め込む
+URL ルーティング:
+  index.html        → ランディング（hashchange イベント）
+  index.html#QXXX   → ビューワー（taxa_cache_QXXX.json を fetch）
 
-make_index_html(output_dir)
-  SPA 版 index.html を生成する。
+画像レイジーロード（3段制御）:
+  段1: IMG_ZOOM_MIN 未満 → スキップ
+  段2: IMG_DEBOUNCE_MS ms デバウンス
+  段3: IMG_RATE_PER_SEC 件/秒 レートキュー
 
-  URL ルーティング:
-    index.html        → ランディング（カード一覧）
-    index.html#QXXX   → 系統図ビューワー（fetch で JSON を読み込み描画）
+ツールチップ:
+  hide delay 300ms + 近傍ガード 10px
+  幅は CSS 変数 --tt-w（凡例バーのスライダーで操作）
+  localStorage["taxa_tt_w"] に保存
 
-  動作:
-    - カードデータはビルド時に Python が JSON を走査して TAXA_LIST に埋め込む
-    - ハッシュ変化イベント（hashchange）でビューを切り替え
-    - ビューワー部分は taxa_html.py の HTML テンプレートを再利用
-
-画像レイジーロード（3段制御）
-  段1: scale < IMG_ZOOM_MIN(0.35) → ロードしない
-  段2: デバウンス IMG_DEBOUNCE_MS(1500ms)
-  段3: レートキュー IMG_RATE_PER_SEC(4件/秒)
-  Wikimedia 標準サイズ: 120px（ノード）/ 250px（ツールチップ）
-
-検索 doSrch()
-  🔍 ボタン / Enter キーで実行（リアルタイム検索は無効）
-  walkAll() で _children 含む全走査 → 自動展開 → fitV()
+Wikipedia openWiki():
+  JA + 和名あり → API で日本語版存在確認 → なければ EN
 ```
+
+---
+
+## キャッシュの `_meta` フィールド
+
+```json
+{
+  "_meta": {
+    "fetch_version": "1.7",
+    "fetched_at":    "2026-03-25T10:00:00",
+    "split_rank":    "family",
+    "stop_rank":     "species"
+  }
+}
+```
+
+`fetch_version` が `1.4` 未満のキャッシュは `image_url` が含まれないため再取得を推奨します。
 
 ---
 
 ## バージョン履歴
 
-### v6.0（現バージョン / ベースライン）
+### v6.0（現バージョン）
 
-**確定日: 2026-03 / 合計 3,162行（taxa_tree: 724 / taxa_fetch: 1,078 / taxa_html: 1,360）**
-
-#### taxa_tree.py の主な変更
-
-| 変更 | 内容 |
-|---|---|
-| `--render-all` フラグ | 一括再生成モード。`--qid`/`--taxon` と排他。standalone は全キャッシュを HTML 再変換、web は余分な HTML を削除して index.html のみ再生成 |
-| `_cleanup_html()` | web モード時に `taxa_*.html` を削除するヘルパー。`_save_html()` と `_render_all()` から呼ばれる |
-| `--web` 自動クリーンアップ | `_save_html(web=True)` 実行時に余分な HTML を自動削除 |
-| SPA 対応（`_render_all` web） | `taxa_*.html` なしで `index.html` だけで系統図が閲覧できる構成を一括適用 |
-
-#### module/taxa_html.py の主な変更
-
-| 変更 | 内容 |
-|---|---|
-| `make_index_html()` → SPA | `index.html` をランディング + ビューワーの統合 SPA に刷新。`index.html#QID` で直接系統図を開ける |
-| ルーティング | `location.hash` + `hashchange` イベントでページ遷移なしにビューを切り替え |
-| ビューワー再利用 | `HTML` テンプレートの CSS・JS を SPA 内に埋め込み、コードの重複を排除 |
-
----
+**確定日: 2026-03 / 合計 2,997行（taxa_tree: 724 / taxa_fetch: 1,078 / taxa_html: 1,195）**
 
 #### FETCH_VERSION 変遷
 
 | Ver | 主な変更 |
 |---|---|
-| 1.0 | ファイル分割時の初版 |
-| 1.2 | プログレスバー科ベース化・バージョン定数・_meta キャッシュ記録 |
-| 1.3 | SPARQL に P18 再追加（脱落バグ修正） |
-| 1.4 | resolve_image_url を MD5方式に変更（API 呼び出し廃止） |
-| 1.5 | 子ノード補完（A+B）・`--email`・User-Agent メール埋め込み |
-| 1.6 | P171+ 推移的閉包による補完（GBIF・プレフィックス方式を廃止） |
-| **1.7** | 科をまたいだ重複ノードを排除（visited ガード強化・ランクフィルタ修正） |
+| 1.0 | ファイル分割初版 |
+| 1.3 | P18 再追加（脱落バグ修正） |
+| 1.4 | `resolve_image_url` MD5方式（API廃止） |
+| 1.5 | 子補完（A+B）・`--email`・UA メール埋め込み |
+| 1.6 | P171+ 推移的閉包（GBIF・プレフィックス方式廃止） |
+| **1.7** | 科またぎ重複排除・ランクフィルタ修正 |
 
 #### HTML_VERSION 変遷
 
 | Ver | 主な変更 |
 |---|---|
-| 1.0 | ファイル分割時の初版 |
-| 1.2 | 画像アイコン・モバイル対応・Wikipedia リンク |
-| 1.3 | ツールチップ pointer-events 修正 |
-| 1.4 | crossOrigin・250px・Wikipedia 全ランク・JA存在チェック |
-| **1.5** | レイジーロード3段制御・補完ノード色分け・検索ボタン式・standalone/web モード・SPA ランディング |
+| 1.0 | 分割初版 |
+| 1.2 | 画像・モバイル・Wikipedia リンク |
+| 1.4 | crossOrigin・250px・JA存在チェック・全ランク Wiki ボタン |
+| **1.5** | SPA 統合・補完色分け・レイジーロード3段・ツールチップ UX・サイズスライダー |
 
----
+### 旧バージョン
 
-### 旧バージョン（v1〜v5）
-
-| バージョン | 行数 | 主な内容 |
+| Ver | 行数 | 内容 |
 |---|---|---|
-| v5.0 | 2,639行 | 3ファイル構成確立。FETCH 1.5〜1.7 / HTML 1.5 |
-| v4.0 | 1,698行 | 単一ファイル。画像URL・Wikipedia リンク・モバイル対応 |
-| v3.0 | 1,529行 | OUTPUT_DIR = "result" 定数新設 |
-| v2.0 | 1,515行 | Wikimedia Commons 画像表示（P18取得） |
-| v1.0 | 1,131行 | passeriformes_tree.py v7 を汎用化。全生物界対応 |
+| v5.0 | 2,639行 | 3ファイル構成確立 |
+| v4.0 | 1,698行 | 単一ファイル・画像・Wikipedia |
+| v1.0 | 1,131行 | passeriformes_tree.py を汎用化 |
 
 ---
 
-## 既知の制約と改善候補
+## 既知の制約
 
 | # | 項目 | 詳細 |
-|---|------|------|
-| 1 | P171+ 平坦化 | P171+ 取得時、亜属が子なしノードになる場合がある（取りこぼしはなし） |
+|---|---|---|
+| 1 | P171+ 平坦化 | 亜属が子なしノードになることがある（取りこぼしはなし） |
 | 2 | 画像取得漏れ | P18 未登録の種は画像なし |
 | 3 | オフライン閲覧 | 画像表示にインターネット接続が必要 |
 | 4 | web モードのローカル動作 | CORS のため `file://` では動作しない |
-| 5 | 取得速度 | `time.sleep(0.8)` 固定。動的スリープで改善余地あり |
-| 6 | HTML サイズ（standalone） | 全種取得時に数十 MB になりうる |
+| 5 | 取得速度 | `time.sleep(0.8)` 固定 |
 
 ---
 
@@ -471,4 +429,3 @@ make_index_html(output_dir)
 3. Oliveros, C. H., et al. (2019). PNAS, 116(16). https://doi.org/10.1073/pnas.1813206116
 4. Bostock, M. (2023). D3.js v7. https://d3js.org/
 5. Wikimedia Foundation. Wikimedia Commons. https://commons.wikimedia.org/
-6. GBIF Secretariat (2024). GBIF Backbone Taxonomy. https://doi.org/10.15468/39omei
