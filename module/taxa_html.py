@@ -1126,7 +1126,11 @@ def make_index_html(output_dir) -> str:
 
     # ── ビューワー CSS を抽出 ──────────────────────────────────────
     css_m  = re.search(r"<style>(.*?)</style>", HTML, re.DOTALL)
-    viewer_css = css_m.group(1) if css_m else ""
+    viewer_css_raw = css_m.group(1) if css_m else ""
+    # SPA 側で #loading CSS を定義するため viewer_css の重複定義を除去
+    import re as _re3
+    viewer_css = _re3.sub(r'#loading(?:-bar(?:-outer)?)?\{[^}]+\}\n?',
+                          "", viewer_css_raw)
 
     # ── ビューワー BODY を抽出し SPA 用に調整 ────────────────────
     body_m = re.search(r"<body[^>]*>(.*?)</body>", HTML, re.DOTALL)
@@ -1161,6 +1165,7 @@ def make_index_html(output_dir) -> str:
         "<style>\n"
         + _spa_css(viewer_css)
         + "\n</style></head><body>\n"
+        + '<button id="btn-back" style="display:none" onclick="goLanding()">&#8592; &#19968;&#35239;</button>\n'
         + _spa_landing(date)
         + _spa_viewer(viewer_body, date)
         + _spa_scripts(taxa_js, date)
@@ -1246,7 +1251,6 @@ def _spa_landing(date: str) -> str:
 def _spa_viewer(viewer_body: str, date: str) -> str:
     return (
         '<div id="view-tree">\n'
-        '<button id="btn-back" onclick="goLanding()">&#8592; &#19968;&#35239;</button>\n'
         '<div id="loading">'
         "<div>&#127807; <strong id=\"loading-title\"></strong></div>"
         '<div id="loading-bar-outer"><div id="loading-bar"></div></div>'
@@ -1319,7 +1323,12 @@ async function loadViewer(qid){
   const taxa=TAXA_LIST.find(t=>t.qid===qid);
   if(!taxa){ alert("QID "+qid+" \u306E\u30C7\u30FC\u30BF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093"); return; }
   document.getElementById("view-landing").style.display="none";
-  document.getElementById("view-tree").style.display="block";
+  const vt = document.getElementById("view-tree");
+  vt.style.display="block";
+  // ビューワー内部要素（loading以外）は一旦非表示にしてローディング完了後に表示
+  ["hdr","leg","main"].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.visibility="hidden";
+  });
   document.getElementById("loading").style.display="flex";
   document.getElementById("loading-bar").style.width="0%";
   document.getElementById("loading-title").textContent=taxa.ja||taxa.name;
@@ -1351,6 +1360,10 @@ async function loadViewer(qid){
     for(const c of chunks){merged.set(c,off);off+=c.length;}
     window.DATA=JSON.parse(new TextDecoder().decode(merged));
     document.getElementById("loading").style.display="none";
+    // ビューワー内部要素を表示してから描画
+    ["hdr","leg","main"].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.visibility="";
+    });
     if(typeof init==="function") init();
   }catch(e){
     if(msg) msg.textContent="\u8AAD\u307F\u8FBC\u307F\u5931\u6557: "+e.message;
@@ -1360,10 +1373,17 @@ async function loadViewer(qid){
 
 function route(){
   const qid=location.hash.slice(1);
-  if(qid) loadViewer(qid);
-  else{
+  const backBtn = document.getElementById("btn-back");
+  if(qid){
+    if(backBtn) backBtn.style.display="block";
+    loadViewer(qid);
+  } else{
+    if(backBtn) backBtn.style.display="none";
     document.getElementById("view-landing").style.display="block";
     document.getElementById("view-tree").style.display="none";
+    ["hdr","leg","main"].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.visibility="hidden";
+    });
     document.title="\u7CFB\u7D71\u56F3";
     renderLanding();
   }

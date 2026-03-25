@@ -194,12 +194,6 @@ svg{width:100%;height:100%}
   /* ヘッダーボタンを少し大きく */
   .hb,.tb{ padding:5px 10px !important; font-size:12px !important; }
 }
-#loading{position:fixed;inset:0;background:var(--bg);display:flex;
-  flex-direction:column;align-items:center;justify-content:center;
-  gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
-#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
-#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;
-  transition:width .3s}
 #ov{position:fixed;inset:0;background:rgba(13,17,23,.97);display:flex;
   flex-direction:column;align-items:center;justify-content:center;gap:11px;z-index:999}
 #ov h2{font-size:16px}
@@ -208,9 +202,9 @@ svg{width:100%;height:100%}
 .pi{height:100%;background:var(--hl);border-radius:2px;width:0;transition:width .3s}
 
 </style></head><body>
+<button id="btn-back" style="display:none" onclick="goLanding()">&#8592; &#19968;&#35239;</button>
 <div id="view-landing"><header id="lnd-header"><h1><span>&#127807;</span> &#31995;&#32113;&#22259; &#19968;&#35239;</h1><div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--txt3)">&#26356;&#26032;: 2026-03-25</span><button class="tb" id="btn-theme" onclick="toggleTheme()">&#127769;</button></div></header><main id="lnd-main"><div id="lnd-grid"></div></main><footer id="lnd-footer">&#12487;&#12540;&#12479;: Wikidata &nbsp;|&nbsp; &#29983;&#25104;: 2026-03-25</footer></div>
 <div id="view-tree">
-<button id="btn-back" onclick="goLanding()">&#8592; &#19968;&#35239;</button>
 <div id="loading"><div>&#127807; <strong id="loading-title"></strong></div><div id="loading-bar-outer"><div id="loading-bar"></div></div><div id="loading-msg">&#12487;&#12540;&#12479;&#12434;&#35501;&#12415;&#36796;&#12435;&#12391;&#12356;&#12414;&#12377;&#8230;</div></div>
 
 <div id="loading-bar-outer"><div id="loading-bar"></div></div>
@@ -1061,7 +1055,12 @@ async function loadViewer(qid){
   const taxa=TAXA_LIST.find(t=>t.qid===qid);
   if(!taxa){ alert("QID "+qid+" \u306E\u30C7\u30FC\u30BF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093"); return; }
   document.getElementById("view-landing").style.display="none";
-  document.getElementById("view-tree").style.display="block";
+  const vt = document.getElementById("view-tree");
+  vt.style.display="block";
+  // ビューワー内部要素（loading以外）は一旦非表示にしてローディング完了後に表示
+  ["hdr","leg","main"].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.visibility="hidden";
+  });
   document.getElementById("loading").style.display="flex";
   document.getElementById("loading-bar").style.width="0%";
   document.getElementById("loading-title").textContent=taxa.ja||taxa.name;
@@ -1093,6 +1092,10 @@ async function loadViewer(qid){
     for(const c of chunks){merged.set(c,off);off+=c.length;}
     window.DATA=JSON.parse(new TextDecoder().decode(merged));
     document.getElementById("loading").style.display="none";
+    // ビューワー内部要素を表示してから描画
+    ["hdr","leg","main"].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.visibility="";
+    });
     if(typeof init==="function") init();
   }catch(e){
     if(msg) msg.textContent="\u8AAD\u307F\u8FBC\u307F\u5931\u6557: "+e.message;
@@ -1102,10 +1105,17 @@ async function loadViewer(qid){
 
 function route(){
   const qid=location.hash.slice(1);
-  if(qid) loadViewer(qid);
-  else{
+  const backBtn = document.getElementById("btn-back");
+  if(qid){
+    if(backBtn) backBtn.style.display="block";
+    loadViewer(qid);
+  } else{
+    if(backBtn) backBtn.style.display="none";
     document.getElementById("view-landing").style.display="block";
     document.getElementById("view-tree").style.display="none";
+    ["hdr","leg","main"].forEach(id => {
+      const el = document.getElementById(id); if (el) el.style.visibility="hidden";
+    });
     document.title="\u7CFB\u7D71\u56F3";
     renderLanding();
   }
