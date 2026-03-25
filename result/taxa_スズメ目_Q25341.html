@@ -466,7 +466,8 @@ function update(src) {
     const sel = d3.select(this);
     const cid = ensureClip(d.data.id);
     sel.append("image").attr("class","species-img")
-      .attr("href", d.data.image_url)
+      .attr("href", "")                    // 初期は空→レイジーロード
+      .attr("data-src", d.data.image_url)  // 実URLはdata-srcに保持
       .attr("crossOrigin", "anonymous")
       .attr("x", -IMG_R).attr("y", -IMG_R)
       .attr("width", IMG_R*2).attr("height", IMG_R*2)
@@ -513,6 +514,8 @@ function update(src) {
     .attr("transform", _ => `translate(${layoutMode==="lr"?src.y:src.x},${layoutMode==="lr"?src.x:src.y})`)
     .style("opacity", 0).remove();
   root.descendants().forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+  // 再描画後に可視範囲内の画像をロード
+  setTimeout(loadVisibleImages, 250);
 }
 
 // ─── レイアウト補助 ───────────────────────────────────────────────
@@ -643,6 +646,36 @@ function doSrch(q) {
   }
 }
 
+// ─── 画像レイジーロード ───────────────────────────────────────────
+// SVG <image> 要素は IntersectionObserver の対象外のため
+// D3 の zoom イベントと update 後に可視判定して順次ロードする
+function loadVisibleImages() {
+  const svgRect = mainEl.getBoundingClientRect();
+  // 現在の transform を取得して SVG 座標→画面座標に変換
+  const t = d3.zoomTransform(svg.node());
+  g.selectAll("image.species-img").each(function() {
+    const el  = d3.select(this);
+    const src = el.attr("data-src");
+    if (!src || el.attr("href")) return; // 読込済みまたはURLなし
+    // ノードのSVG座標を画面座標に変換
+    const parent = this.parentNode;
+    if (!parent) return;
+    const nd = d3.select(parent).datum();
+    if (!nd) return;
+    const sx = layoutMode === "lr" ? nd.y : nd.x;
+    const sy = layoutMode === "lr" ? nd.x : nd.y;
+    const [px, py] = [t.applyX(sx), t.applyY(sy)];
+    // 画面内 ± マージン で判定
+    const margin = 200;
+    if (px > -margin && px < svgRect.width  + margin &&
+        py > -margin && py < svgRect.height + margin) {
+      el.attr("href", src); // ロード開始
+    }
+  });
+}
+// zoom 終了時と update 後に可視画像をロード
+zm.on("end.lazyimg", loadVisibleImages);
+
 // ─── デバイス判定 ───────────────────────────────────────────────
 const isTouchDev = window.matchMedia('(pointer: coarse)').matches;
 
@@ -742,12 +775,13 @@ function showTT(e, d) {
   const creditEl = document.getElementById("tt-credit");
 
   if (d.data.image_url) {
-    // サムネイルURLの解像度を220pxに差し替え
+
     // Special:FilePath?width= 方式: width値を220に差し替え
     // Wikimedia API URL の w= パラメータと Special:FilePath の width= 両方に対応
+    // 250px は Wikimedia 標準サイズ（220px は非標準で 429 になる）
     const large = d.data.image_url
-      .replace(/\/\d+px-/, '/220px-')           // CDN thumb URL
-      .replace(/[?&]width=\d+/, '?width=220');  // Special:FilePath URL
+      .replace(/\/\d+px-/, '/250px-')           // CDN thumb URL
+      .replace(/[?&]width=\d+/, '?width=250');  // Special:FilePath URL
     imgEl.src = large;
     imgEl.classList.remove("hidden");
     phEl.classList.add("hidden");
