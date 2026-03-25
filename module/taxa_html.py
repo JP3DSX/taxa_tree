@@ -12,6 +12,7 @@ module/taxa_html.py  ─  HTML生成・UI モジュール
 """
 
 import json
+import re
 from datetime import datetime
 
 # HTML・UI モジュールのバージョン
@@ -158,6 +159,12 @@ svg{width:100%;height:100%}
   /* ヘッダーボタンを少し大きく */
   .hb,.tb{ padding:5px 10px !important; font-size:12px !important; }
 }
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
+#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
+#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;
+  transition:width .3s}
 #ov{position:fixed;inset:0;background:rgba(13,17,23,.97);display:flex;
   flex-direction:column;align-items:center;justify-content:center;gap:11px;z-index:999}
 #ov h2{font-size:16px}
@@ -166,6 +173,11 @@ svg{width:100%;height:100%}
 .pi{height:100%;background:var(--hl);border-radius:2px;width:0;transition:width .3s}
 </style></head>
 <body style="display:flex;flex-direction:column">
+<div id="loading">
+  <div>🌿 <strong>__TITLE__</strong> 系統図</div>
+  <div id="loading-bar-outer"><div id="loading-bar"></div></div>
+  <div id="loading-msg">データを読み込んでいます…</div>
+</div>
 <div id="ov"><h2>🌿 系統図を準備中…</h2>
   <p id="om">データ解析中</p>
   <div class="pb"><div class="pi" id="pi"></div></div></div>
@@ -238,7 +250,7 @@ svg{width:100%;height:100%}
   <div id="foot">QID: __QID__ &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: __DATE__</div>
 </div>
 <script>
-const DATA=__DATA__;
+__DATA_BLOCK__
 const RANK_ORD=["domain","kingdom","subkingdom","phylum","subphylum","superclass",
   "class","subclass","infraclass","superorder","order","suborder","infraorder",
   "superfamily","family","subfamily","tribe","subtribe","genus","subgenus",
@@ -958,27 +970,194 @@ window.addEventListener("load", init);
 </script></body></html>"""
 
 def make_html(tree: dict, root_qid: str) -> str:
+    """standalone モード: JSON を HTML に埋め込む（単体ファイルで動作）。"""
+    title = tree.get("name", root_qid)
+    if tree.get("ja"):
+        title = f"{tree['ja']} ({title})"
+    date       = datetime.now().strftime("%Y-%m-%d")
+    js         = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
+    data_block = f"const DATA={js};"
+    return (HTML
+            .replace("__TITLE__",      title)
+            .replace("__QID__",        root_qid)
+            .replace("__DATE__",       date)
+            .replace("__DATA_BLOCK__", data_block))
+
+
+def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
+    """
+    web モード: JSON を外部ファイルから fetch して描画する。
+    GitHub Pages 専用（file:// では CORS のためローカル動作不可）。
+    json_filename: 同じディレクトリに置く JSON ファイル名
+    """
     title = tree.get("name", root_qid)
     if tree.get("ja"):
         title = f"{tree['ja']} ({title})"
     date  = datetime.now().strftime("%Y-%m-%d")
-    js    = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
+    jf    = json_filename
+    # ストリーミング fetch でプログレスバーを更新してから init()
+    data_block = "\n".join([
+        "let DATA = null;",
+        "(async () => {",
+        '  const bar = document.getElementById("loading-bar");',
+        '  const msg = document.getElementById("loading-msg");',
+        "  try {",
+        f'    const resp = await fetch("{jf}");',
+        '    if (!resp.ok) throw new Error("HTTP " + resp.status);',
+        '    const total = parseInt(resp.headers.get("content-length") || "0");',
+        "    const reader = resp.body.getReader();",
+        "    let received = 0; const chunks = [];",
+        "    while (true) {",
+        "      const {done, value} = await reader.read();",
+        "      if (done) break;",
+        "      chunks.push(value); received += value.length;",
+        "      if (total > 0 && bar)",
+        '        bar.style.width = Math.min(received / total * 90, 90) + "%";',
+        "    }",
+        '    if (msg) msg.textContent = "描画中…";',
+        '    if (bar) bar.style.width = "100%";',
+        "    const size = chunks.reduce((a, b) => a + b.length, 0);",
+        "    const merged = new Uint8Array(size);",
+        "    let off = 0;",
+        "    for (const c of chunks) { merged.set(c, off); off += c.length; }",
+        "    DATA = JSON.parse(new TextDecoder().decode(merged));",
+        "    init();",
+        "  } catch(e) {",
+        '    if (msg) msg.textContent = "読み込み失敗: " + e.message;',
+        '    console.error("JSON load error:", e);',
+        "  }",
+        "})();",
+    ])
     return (HTML
-            .replace("__TITLE__", title)
-            .replace("__QID__",   root_qid)
-            .replace("__DATE__",  date)
-            .replace("__DATA__",  js))
+            .replace("__TITLE__",      title)
+            .replace("__QID__",        root_qid)
+            .replace("__DATE__",       date)
+            .replace("__DATA_BLOCK__", data_block))
+
 
 # ─────────────────────────────────────────────────────────────────
 #  ランディングページ生成
 # ─────────────────────────────────────────────────────────────────
 
-INDEX_HTML = r"""<!DOCTYPE html>
-<html lang="ja" data-theme="dark"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>taxa_tree — 系統図一覧</title>
-<style>
+
+# ─────────────────────────────────────────────────────────────────
+#  SPA 生成（ランディング + ビューワー統合）
+# ─────────────────────────────────────────────────────────────────
+
+# ランク日本語表記
+_RANK_JA = {
+    "domain": "域", "kingdom": "界", "phylum": "門", "subphylum": "亜門",
+    "superclass": "上綱", "class": "綱", "subclass": "亜綱",
+    "infraclass": "下綱", "superorder": "上目", "order": "目",
+    "suborder": "亜目", "infraorder": "下目", "superfamily": "上科",
+    "family": "科", "subfamily": "亜科", "tribe": "族",
+    "genus": "属", "subgenus": "亜属", "species": "種",
+    "subspecies": "亜種", "variety": "変種", "form": "品種",
+    "unknown": "?",
+}
+
+
+def make_index_html(output_dir) -> str:
+    """
+    SPA 版 index.html を生成する。
+
+    URL ルーティング:
+      index.html       -> ランディング（カード一覧）
+      index.html#QXXX  -> 系統図ビューワー（taxa_cache_QXXX.json を fetch）
+
+    output_dir: str または Path
+    """
+    from pathlib import Path as _Path
+    import json as _json
+    import re as _re
+
+    out_dir = _Path(output_dir)
+    date    = datetime.now().strftime("%Y-%m-%d")
+
+    # ── カードデータをビルド時に収集 ──────────────────────────────
+    json_files = sorted(
+        out_dir.glob("taxa_cache_Q*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    taxa_list = []
+    for jp in json_files:
+        m = _re.search(r"taxa_cache_(Q\d+)\.json$", jp.name)
+        if not m:
+            continue
+        qid = m.group(1)
+        sci_name = ja_name = rank = ""
+        sp_count = fa_count = node_count = 0
+        try:
+            with open(jp, encoding="utf-8") as f:
+                tree = _json.load(f)
+            sci_name  = tree.get("name", "")
+            ja_name   = tree.get("ja",   "")
+            rank      = tree.get("rank", "")
+            stack = [tree]
+            while stack:
+                nd = stack.pop()
+                node_count += 1
+                r = nd.get("rank", "")
+                if r == "species":  sp_count += 1
+                elif r == "family": fa_count += 1
+                stack.extend(nd.get("children", []))
+        except Exception:
+            pass
+        file_date = datetime.fromtimestamp(jp.stat().st_mtime).strftime("%Y-%m-%d")
+        taxa_list.append({
+            "qid":     qid,
+            "name":    sci_name,
+            "ja":      ja_name,
+            "rank":    rank,
+            "rank_ja": _RANK_JA.get(rank, rank),
+            "sp":      sp_count,
+            "fa":      fa_count,
+            "nodes":   node_count,
+            "date":    file_date,
+            "json":    jp.name,
+        })
+
+    taxa_js = _json.dumps(taxa_list, ensure_ascii=False)
+
+    # ── ビューワー CSS を抽出 ──────────────────────────────────────
+    css_m  = re.search(r"<style>(.*?)</style>", HTML, re.DOTALL)
+    viewer_css = css_m.group(1) if css_m else ""
+
+    # ── ビューワー BODY を抽出し SPA 用に調整 ────────────────────
+    body_m = re.search(r"<body>(.*?)</body>", HTML, re.DOTALL)
+    viewer_body = body_m.group(1) if body_m else ""
+    # D3 script タグを削除（SPA 側で1回だけ読み込む）
+    viewer_body = re.sub(
+        r'<script src="https://cdnjs.cloudflare.com.*?"></script>\s*', "",
+        viewer_body
+    )
+    # __DATA_BLOCK__ プレースホルダ → SPA ルーターが注入するためコメントに
+    viewer_body = viewer_body.replace("__DATA_BLOCK__", "/* DATA injected by SPA router */")
+    # タイトル等のプレースホルダ → SPA ルーターが動的に設定
+    viewer_body = viewer_body.replace("__TITLE__", "").replace("__QID__", "").replace("__DATE__", date)
+
+    # ── SPA HTML を組み立て ────────────────────────────────────────
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang=\"ja\" data-theme=\"dark\"><head>\n'
+        '<meta charset=\"UTF-8\">\n'
+        '<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n'
+        "<title>系統図</title>\n"
+        "<style>\n"
+        + _spa_css(viewer_css)
+        + "\n</style></head><body>\n"
+        + _spa_landing(date)
+        + _spa_viewer(viewer_body, date)
+        + _spa_scripts(taxa_js, date)
+        + "\n</body></html>"
+    )
+
+
+def _spa_css(viewer_css: str) -> str:
+    """ランディング + ビューワー共通 CSS を返す。"""
+    return """
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
@@ -990,23 +1169,18 @@ INDEX_HTML = r"""<!DOCTYPE html>
   --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
   --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;
 }
-html,body{min-height:100%;background:var(--bg);color:var(--txt);
-  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
-  transition:background .2s,color .2s}
-header{background:var(--bg2);border-bottom:1px solid var(--brd);
+html,body{height:100%;background:var(--bg);color:var(--txt);
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif}
+#view-landing{display:block}
+#view-tree{display:none;height:100vh;overflow:hidden}
+#lnd-header{background:var(--bg2);border-bottom:1px solid var(--brd);
   padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
-header h1 span{font-size:20px}
-#gen-date{font-size:11px;color:var(--txt3)}
-.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
-  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
-  transition:border-color .15s,color .15s}
-.tb:hover{border-color:var(--txt2);color:var(--txt)}
-main{max-width:960px;margin:0 auto;padding:28px 24px}
+#lnd-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+#lnd-main{max-width:960px;margin:0 auto;padding:28px 24px}
 .empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
 .card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;
-  padding:18px;text-decoration:none;color:inherit;
+  padding:18px;text-decoration:none;color:inherit;cursor:pointer;
   transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}
 .card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}
 .card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}
@@ -1022,147 +1196,165 @@ main{max-width:960px;margin:0 auto;padding:28px 24px}
 [data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}
 [data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}
 .arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}
-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
+#lnd-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
   border-top:1px solid var(--brd);margin-top:32px}
-</style></head>
-<body>
-<header>
-  <h1><span>🌿</span> 系統図 一覧</h1>
-  <div style="display:flex;align-items:center;gap:12px">
-    <span id="gen-date"></span>
-    <button class="tb" id="btn-theme" onclick="toggleTheme()">🌙</button>
-  </div>
-</header>
-<main>
-__CARDS__
-</main>
-<footer>データ: Wikidata &nbsp;|&nbsp; 生成: __DATE__</footer>
-<script>
-document.getElementById("gen-date").textContent = "更新: __DATE__";
+.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.tb:hover{border-color:var(--txt2);color:var(--txt)}
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
+#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
+#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}
+#btn-back{position:fixed;top:10px;left:10px;z-index:200;
+  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+#btn-back:hover{border-color:var(--hl);color:var(--hl)}
+""" + viewer_css
+
+
+def _spa_landing(date: str) -> str:
+    return (
+        '<div id="view-landing">'
+        '<header id="lnd-header">'
+        '<h1><span>&#127807;</span> &#31995;&#32113;&#22259; &#19968;&#35239;</h1>'
+        '<div style="display:flex;align-items:center;gap:12px">'
+        f'<span style="font-size:11px;color:var(--txt3)">&#26356;&#26032;: {date}</span>'
+        '<button class="tb" id="btn-theme" onclick="toggleTheme()">&#127769;</button>'
+        "</div></header>"
+        '<main id="lnd-main"><div id="lnd-grid"></div></main>'
+        f'<footer id="lnd-footer">&#12487;&#12540;&#12479;: Wikidata &nbsp;|&nbsp; &#29983;&#25104;: {date}</footer>'
+        "</div>\n"
+    )
+
+
+def _spa_viewer(viewer_body: str, date: str) -> str:
+    return (
+        '<div id="view-tree">\n'
+        '<button id="btn-back" onclick="goLanding()">&#8592; &#19968;&#35239;</button>\n'
+        '<div id="loading">'
+        "<div>&#127807; <strong id=\"loading-title\"></strong></div>"
+        '<div id="loading-bar-outer"><div id="loading-bar"></div></div>'
+        '<div id="loading-msg">&#12487;&#12540;&#12479;&#12434;&#35501;&#12415;&#36796;&#12435;&#12391;&#12356;&#12414;&#12377;&#8230;</div>'
+        "</div>\n"
+        + viewer_body
+        + "</div>\n"
+    )
+
+
+def _spa_scripts(taxa_js: str, date: str) -> str:
+    return (
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>\n'
+        "<script>\n"
+        f"const TAXA_LIST = {taxa_js};\n"
+        + _SPA_JS.replace("__DATE__", date)
+        + "\n</script>"
+    )
+
+
+_SPA_JS = r"""
 function toggleTheme(){
-  const h=document.documentElement,t=h.getAttribute("data-theme")==="dark"?"light":"dark";
+  const h=document.documentElement;
+  const t=h.getAttribute("data-theme")==="dark"?"light":"dark";
   h.setAttribute("data-theme",t);
-  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+  const btn=document.getElementById("btn-theme");
+  if(btn) btn.textContent=t==="dark"?"\u{1F319}":"\u2600\uFE0F";
   localStorage.setItem("taxa_theme",t);
 }
 (function(){
   const t=localStorage.getItem("taxa_theme")||"dark";
   document.documentElement.setAttribute("data-theme",t);
-  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+  const btn=document.getElementById("btn-theme");
+  if(btn) btn.textContent=t==="dark"?"\u{1F319}":"\u2600\uFE0F";
 })();
-</script>
-</body></html>"""
 
-# ランク日本語表記（index ページ用）
-_RANK_JA = {
-    "domain": "域", "kingdom": "界", "phylum": "門", "subphylum": "亜門",
-    "class": "綱", "subclass": "亜綱", "order": "目", "suborder": "亜目",
-    "family": "科", "subfamily": "亜科", "genus": "属", "species": "種",
-    "unknown": "?",
+function renderLanding(){
+  const grid=document.getElementById("lnd-grid");
+  if(!TAXA_LIST.length){
+    grid.innerHTML='<div class="empty"><p>\u{1F4C2} \u307E\u3060\u7CFB\u7D71\u56F3\u304C\u3042\u308A\u307E\u305B\u3093\u3002</p>'
+      +'<p style="margin-top:8px;font-size:12px">python taxa_tree.py --qid Q25341 \u3092\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002</p></div>';
+    return;
+  }
+  grid.innerHTML='<div class="grid">'
+    +TAXA_LIST.map(t=>{
+      const title=t.ja||t.name;
+      const sub=t.ja?`<div class="card-sci">${t.name}</div>`:"";
+      const badges=[
+        t.sp  ?`<span class="badge b-sp">\u{1F426} ${t.sp.toLocaleString()}\u7A2E</span>`:"",
+        t.fa  ?`<span class="badge b-fa">\u{1F3F7} ${t.fa.toLocaleString()}\u79D1</span>`:"",
+        t.nodes?`<span class="badge b-nd">\u{1F4E6} ${t.nodes.toLocaleString()}\u4EF6</span>`:"",
+        `<span class="badge b-dt">\u{1F4C5} ${t.date}</span>`,
+      ].join("");
+      return `<div class="card" onclick="goViewer('${t.qid}')" role="button" tabindex="0"
+          onkeydown="if(event.key==='Enter')goViewer('${t.qid}')">
+        <div class="card-rank">${t.rank_ja} ${t.qid}</div>
+        <div class="card-title">${title}</div>
+        ${sub}
+        <div class="card-meta">${badges}</div>
+        <div class="arrow">\u7CFB\u7D71\u56F3\u3092\u958B\u304F \u2192</div>
+      </div>`;
+    }).join("")+"</div>";
 }
 
+let DATA=null;
+function goLanding(){ location.hash=""; }
+function goViewer(qid){ location.hash=qid; }
 
-def make_index_html(output_dir) -> str:
-    """
-    output_dir 内の taxa_*.html を走査してランディングページ HTML を返す。
-    対応する taxa_cache_<QID>.json が存在すれば種数・属数・科数も表示する。
+async function loadViewer(qid){
+  const taxa=TAXA_LIST.find(t=>t.qid===qid);
+  if(!taxa){ alert("QID "+qid+" \u306E\u30C7\u30FC\u30BF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093"); return; }
+  document.getElementById("view-landing").style.display="none";
+  document.getElementById("view-tree").style.display="block";
+  document.getElementById("loading").style.display="flex";
+  document.getElementById("loading-bar").style.width="0%";
+  document.getElementById("loading-title").textContent=taxa.ja||taxa.name;
+  document.getElementById("loading-msg").textContent="\u30C7\u30FC\u30BF\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u3044\u307E\u3059\u2026";
+  document.title=(taxa.ja||taxa.name)+" \u7CFB\u7D71\u56F3";
+  const ttlEl=document.getElementById("ttl");
+  if(ttlEl) ttlEl.innerHTML=`<em>${taxa.ja||taxa.name}</em>${taxa.ja?" ("+taxa.name+")":""} \u7CFB\u7D71\u56F3`;
+  const footEl=document.getElementById("foot");
+  if(footEl) footEl.textContent=`QID: ${taxa.qid} | \u753B\u50CF: Wikimedia Commons | \u751F\u6210: __DATE__`;
+  const bar=document.getElementById("loading-bar");
+  const msg=document.getElementById("loading-msg");
+  try{
+    const resp=await fetch(taxa.json);
+    if(!resp.ok) throw new Error("HTTP "+resp.status);
+    const total=parseInt(resp.headers.get("content-length")||"0");
+    const reader=resp.body.getReader();
+    let received=0; const chunks=[];
+    while(true){
+      const {done,value}=await reader.read();
+      if(done) break;
+      chunks.push(value); received+=value.length;
+      if(total>0&&bar) bar.style.width=Math.min(received/total*90,90)+"%";
+    }
+    if(msg) msg.textContent="\u63CF\u753B\u4E2D\u2026";
+    if(bar) bar.style.width="100%";
+    const size=chunks.reduce((a,b)=>a+b.length,0);
+    const merged=new Uint8Array(size);
+    let off=0;
+    for(const c of chunks){merged.set(c,off);off+=c.length;}
+    DATA=JSON.parse(new TextDecoder().decode(merged));
+    document.getElementById("loading").style.display="none";
+    if(typeof init==="function") init();
+  }catch(e){
+    if(msg) msg.textContent="\u8AAD\u307F\u8FBC\u307F\u5931\u6557: "+e.message;
+    console.error("JSON load error:",e);
+  }
+}
 
-    output_dir: str または Path
-    """
-    from pathlib import Path as _Path
-    import json as _json
-    import re as _re
-
-    out_dir = _Path(output_dir)
-    date    = datetime.now().strftime("%Y-%m-%d")
-
-    # taxa_*.html を更新日時の新しい順に列挙
-    taxa_files = sorted(
-        out_dir.glob("taxa_*.html"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-    if not taxa_files:
-        cards_html = (
-            '<div class="empty">'
-            '<p>📂 まだ系統図がありません。</p>'
-            '<p style="margin-top:8px;font-size:12px">'
-            'python taxa_tree.py --qid Q25341 を実行してください。</p>'
-            '</div>'
-        )
-    else:
-        cards = []
-        for html_path in taxa_files:
-            # ファイル名から QID を抽出: taxa_<name>_<QID>.html
-            m = _re.search(r'_(Q\d+)\.html$', html_path.name)
-            qid = m.group(1) if m else ""
-
-            # キャッシュ JSON から詳細情報を取得
-            sci_name = ja_name = rank = ""
-            sp_count = ge_count = fa_count = node_count = 0
-            cache_path = out_dir / f"taxa_cache_{qid}.json" if qid else None
-            if cache_path and cache_path.exists():
-                try:
-                    with open(cache_path, encoding="utf-8") as f:
-                        tree = _json.load(f)
-                    sci_name   = tree.get("name", "")
-                    ja_name    = tree.get("ja",   "")
-                    rank       = tree.get("rank",  "")
-                    # ノード統計
-                    stack = [tree]
-                    while stack:
-                        nd = stack.pop()
-                        node_count += 1
-                        r = nd.get("rank", "")
-                        if r == "species":
-                            sp_count += 1
-                        elif r == "genus":
-                            ge_count += 1
-                        elif r == "family":
-                            fa_count += 1
-                        stack.extend(nd.get("children", []))
-                except Exception:
-                    pass
-
-            # キャッシュがない場合はファイル名から推測
-            if not sci_name:
-                stem    = html_path.stem          # taxa_スズメ目_Q25341
-                parts   = stem.split("_")
-                sci_name = parts[-2] if len(parts) >= 3 else stem
-
-            rank_ja   = _RANK_JA.get(rank, rank)
-            file_date = datetime.fromtimestamp(
-                html_path.stat().st_mtime
-            ).strftime("%Y-%m-%d")
-            rel_path  = html_path.name
-
-            # バッジ HTML
-            badges = []
-            if sp_count:
-                badges.append(f'<span class="badge b-sp">🐦 {sp_count:,}種</span>')
-            if fa_count:
-                badges.append(f'<span class="badge b-fa">🏷 {fa_count:,}科</span>')
-            if node_count:
-                badges.append(f'<span class="badge b-nd">📦 {node_count:,}件</span>')
-            badges.append(f'<span class="badge b-dt">📅 {file_date}</span>')
-
-            title_html = ja_name if ja_name else sci_name
-            sub_html   = f'<div class="card-sci">{sci_name}</div>' if ja_name else ""
-
-            cards.append(
-                f'<a class="card" href="{rel_path}">\n'
-                f'  <div class="card-rank">{rank_ja} {qid}</div>\n'
-                f'  <div class="card-title">{title_html}</div>\n'
-                f'  {sub_html}\n'
-                f'  <div class="card-meta">{"".join(badges)}</div>\n'
-                f'  <div class="arrow">系統図を開く →</div>\n'
-                f'</a>'
-            )
-
-        grid_html = '<div class="grid">\n' + "\n".join(cards) + "\n</div>"
-        cards_html = grid_html
-
-    return (INDEX_HTML
-            .replace("__CARDS__", cards_html)
-            .replace("__DATE__",  date))
+function route(){
+  const qid=location.hash.slice(1);
+  if(qid) loadViewer(qid);
+  else{
+    document.getElementById("view-landing").style.display="block";
+    document.getElementById("view-tree").style.display="none";
+    document.title="\u7CFB\u7D71\u56F3";
+    renderLanding();
+  }
+}
+window.addEventListener("hashchange",route);
+window.addEventListener("load",()=>{renderLanding();route();});
+"""

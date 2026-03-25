@@ -2,8 +2,9 @@
 <html lang="ja" data-theme="dark"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>taxa_tree — 系統図一覧</title>
+<title>系統図</title>
 <style>
+
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
@@ -15,23 +16,18 @@
   --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
   --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;
 }
-html,body{min-height:100%;background:var(--bg);color:var(--txt);
-  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
-  transition:background .2s,color .2s}
-header{background:var(--bg2);border-bottom:1px solid var(--brd);
+html,body{height:100%;background:var(--bg);color:var(--txt);
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif}
+#view-landing{display:block}
+#view-tree{display:none;height:100vh;overflow:hidden}
+#lnd-header{background:var(--bg2);border-bottom:1px solid var(--brd);
   padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
-header h1 span{font-size:20px}
-#gen-date{font-size:11px;color:var(--txt3)}
-.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
-  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
-  transition:border-color .15s,color .15s}
-.tb:hover{border-color:var(--txt2);color:var(--txt)}
-main{max-width:960px;margin:0 auto;padding:28px 24px}
+#lnd-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+#lnd-main{max-width:960px;margin:0 auto;padding:28px 24px}
 .empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
 .card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;
-  padding:18px;text-decoration:none;color:inherit;
+  padding:18px;text-decoration:none;color:inherit;cursor:pointer;
   transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}
 .card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}
 .card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}
@@ -47,55 +43,281 @@ main{max-width:960px;margin:0 auto;padding:28px 24px}
 [data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}
 [data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}
 .arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}
-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
+#lnd-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
   border-top:1px solid var(--brd);margin-top:32px}
-</style></head>
-<body>
-<header>
-  <h1><span>🌿</span> 系統図 一覧</h1>
-  <div style="display:flex;align-items:center;gap:12px">
-    <span id="gen-date"></span>
-    <button class="tb" id="btn-theme" onclick="toggleTheme()">🌙</button>
-  </div>
-</header>
-<main>
-<div class="grid">
-<a class="card" href="taxa_スズメ目_Q25341.html">
-  <div class="card-rank">目 Q25341</div>
-  <div class="card-title">スズメ目</div>
-  <div class="card-sci">Passeriformes</div>
-  <div class="card-meta"><span class="badge b-sp">🐦 6,138種</span><span class="badge b-fa">🏷 90科</span><span class="badge b-nd">📦 7,223件</span><span class="badge b-dt">📅 2026-03-25</span></div>
-  <div class="arrow">系統図を開く →</div>
-</a>
-<a class="card" href="taxa_ニシン目_Q193389.html">
-  <div class="card-rank">目 Q193389</div>
-  <div class="card-title">ニシン目</div>
-  <div class="card-sci">Clupeiformes</div>
-  <div class="card-meta"><span class="badge b-sp">🐦 1,272種</span><span class="badge b-fa">🏷 11科</span><span class="badge b-nd">📦 1,444件</span><span class="badge b-dt">📅 2026-03-24</span></div>
-  <div class="arrow">系統図を開く →</div>
-</a>
-<a class="card" href="taxa_サル目_Q7380.html">
-  <div class="card-rank">目 Q7380</div>
-  <div class="card-title">サル目</div>
-  <div class="card-sci">Primates</div>
-  <div class="card-meta"><span class="badge b-sp">🐦 78種</span><span class="badge b-fa">🏷 27科</span><span class="badge b-nd">📦 229件</span><span class="badge b-dt">📅 2026-03-24</span></div>
-  <div class="arrow">系統図を開く →</div>
-</a>
+.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.tb:hover{border-color:var(--txt2);color:var(--txt)}
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
+#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
+#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}
+#btn-back{position:fixed;top:10px;left:10px;z-index:200;
+  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+#btn-back:hover{border-color:var(--hl);color:var(--hl)}
+
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
+  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;
+  --brd:#30363d;--hl:#f0b429;--foot-bg:rgba(13,17,23,.88);
+  --c-domain:#f472b6;--c-kingdom:#e879f9;--c-phylum:#c084fc;
+  --c-class:#a78bfa;--c-order:#818cf8;--c-suborder:#34d399;
+  --c-infraorder:#fb923c;--c-superfamily:#f87171;--c-family:#60a5fa;
+  --c-subfamily:#38bdf8;--c-tribe:#4ade80;--c-genus:#a78bfa;
+  --c-species:#86efac;--c-subspecies:#6ee7b7;--c-variety:#d9f99d;
+  --c-unknown:#6b7280;
+}
+[data-theme="light"]{
+  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;
+  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
+  --brd:#d0d7de;--hl:#b45309;--foot-bg:rgba(246,248,250,.92);
+  --c-domain:#9d174d;--c-kingdom:#86198f;--c-phylum:#7e22ce;
+  --c-class:#6d28d9;--c-order:#4338ca;--c-suborder:#065f46;
+  --c-infraorder:#9a3412;--c-superfamily:#991b1b;--c-family:#1d4ed8;
+  --c-subfamily:#0369a1;--c-tribe:#166534;--c-genus:#6d28d9;
+  --c-species:#15803d;--c-subspecies:#047857;--c-variety:#3f6212;
+  --c-unknown:#374151;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
+  touch-action:manipulation;
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
+  transition:background .2s,color .2s}
+#hdr{display:flex;align-items:center;gap:6px;padding:6px 10px;
+  background:var(--bg2);border-bottom:1px solid var(--brd);flex-wrap:wrap}
+#ttl{font-size:13px;font-weight:600;white-space:nowrap}
+#ttl em{font-style:italic;color:var(--txt2);font-size:11px;font-weight:400;margin-left:4px}
+#srch{background:var(--bg3);border:1px solid var(--brd);color:var(--txt);
+  border-radius:18px;padding:4px 11px;font-size:11px;width:140px;outline:none;
+  transition:background .2s,border-color .15s}
+#srch:focus{border-color:var(--hl)}#srch::placeholder{color:var(--txt3)}
+#srch-btn{background:var(--hl);border:none;color:#000;border-radius:18px;
+  padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;
+  font-weight:600;transition:opacity .15s}
+#srch-btn:hover{opacity:.85}
+#srch-clr{background:transparent;border:1px solid var(--brd);color:var(--txt3);
+  border-radius:18px;padding:4px 8px;font-size:11px;cursor:pointer;
+  display:none}
+#srch-clr:hover{border-color:var(--txt2);color:var(--txt)}
+.hb,.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:3px 9px;font-size:11px;cursor:pointer;
+  white-space:nowrap;transition:border-color .15s,color .15s,background .15s}
+.hb:hover,.tb:hover{border-color:var(--txt2);color:var(--txt)}
+.tb.active{border-color:var(--hl);color:var(--hl);background:rgba(240,180,41,.08)}
+.ctrl{display:flex;gap:4px;padding-left:7px;border-left:1px solid var(--brd)}
+#stat{font-size:11px;color:var(--txt3);margin-left:auto;white-space:nowrap;display:flex;gap:9px}
+.sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:2px}
+#leg{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:3px 10px;
+  background:var(--bg2);border-bottom:1px solid var(--brd);font-size:10px;color:var(--txt3)}
+.li{display:flex;align-items:center;gap:3px}
+.ld{width:7px;height:7px;border-radius:50%}
+#main{overflow:hidden;height:calc(100vh - 64px);position:relative}
+svg{width:100%;height:100%}
+.lk{fill:none;stroke:var(--brd);stroke-width:.7}
+.nd{cursor:pointer}
+.nd circle.bg{stroke-width:1.5;transition:r .12s,opacity .15s}
+.nd:hover circle.bg{filter:brightness(1.3)}
+.nd .img-ring{fill:none;stroke-width:2;transition:stroke-width .12s,r .12s}
+.nd:hover .img-ring{stroke-width:2.8}
+.nd text{font-size:11px;fill:var(--txt);pointer-events:none;dominant-baseline:central}
+.primary-lbl{font-style:italic;fill:var(--txt2)!important}
+.secondary-lbl{font-size:9px;fill:var(--txt3)!important}
+.nh circle.bg,.nh .img-ring{stroke:var(--hl)!important;stroke-width:2.5!important}
+.nh text{fill:var(--hl)!important}
+.nm{opacity:.1}
+/* 補完取得ノードのバッジ */
+.nd.strategy-prefix .bg,.nd.strategy-prefix .img-ring{stroke:#f59e0b!important}
+.nd.strategy-gbif    .bg,.nd.strategy-gbif    .img-ring{stroke:#3b82f6!important}
+.nd.strategy-incomplete .bg{stroke:#ef4444!important;stroke-dasharray:3,2}
+/* ツールチップ */
+#tt{position:absolute;background:var(--bg2);border:1px solid var(--brd);
+  border-radius:10px;padding:0;pointer-events:auto;display:none;
+  width:220px;z-index:50;overflow:hidden;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+#tt-img{width:220px;height:136px;object-fit:cover;display:block;background:var(--bg3)}
+#tt-img.hidden{display:none}
+#tt-ph{width:220px;height:136px;display:flex;align-items:center;justify-content:center;
+  font-size:30px;background:var(--bg3)}
+#tt-ph.hidden{display:none}
+#tt-body{padding:9px 12px}
+#tt-rank{font-size:10px;color:var(--txt3)}
+#tt-name{font-weight:600;font-size:12px;font-style:italic;
+  word-break:break-all;margin-top:1px}
+#tt-ja{color:var(--txt2);font-size:11px;margin-top:1px}
+#tt-meta{font-size:10px;color:var(--txt3);margin-top:5px;
+  padding-top:5px;border-top:1px solid var(--brd);
+  display:flex;justify-content:space-between;align-items:flex-end}
+#tt-cnt{white-space:nowrap}
+#tt-credit{font-size:9px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:130px;text-align:right}
+#foot{position:absolute;bottom:7px;left:9px;font-size:10px;color:var(--txt3);
+  background:var(--foot-bg);padding:4px 8px;border-radius:5px;
+  border:1px solid var(--brd);line-height:1.8;pointer-events:none}
+/* ── モバイル専用スタイル ─────────────── */
+@media (pointer: coarse) {
+  /* ツールチップを画面中央下部に固定 */
+  #tt{
+    position:fixed !important;
+    left:50% !important;
+    transform:translateX(-50%);
+    bottom:12px !important;
+    top:auto !important;
+    width:min(320px, calc(100vw - 24px)) !important;
+    max-height:75vh;
+    overflow-y:auto;
+    box-shadow:0 -4px 24px rgba(0,0,0,.5);
+  }
+  /* 閉じるボタンを表示 */
+  #tt-close{ display:flex !important }
+  /* ノードのタップ領域を広げる */
+  .nd circle.bg{ stroke-width:2 }
+  /* 長押しフィードバック */
+  .nd.pressing circle.bg{
+    stroke:var(--hl) !important;
+    stroke-width:3 !important;
+    transition:stroke .1s,stroke-width .1s;
+  }
+  /* モバイルで画像を横幅いっぱいに */
+  #tt-img,#tt-ph{
+    width:100% !important;
+    height:160px !important;
+  }
+  /* Wikipedia ボタンをタップしやすく */
+  #tt-wiki-btn{
+    padding:10px 0 !important;
+    font-size:13px !important;
+  }
+  /* ヘッダーボタンを少し大きく */
+  .hb,.tb{ padding:5px 10px !important; font-size:12px !important; }
+}
+#loading{position:fixed;inset:0;background:var(--bg);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
+#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
+#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;
+  transition:width .3s}
+#ov{position:fixed;inset:0;background:rgba(13,17,23,.97);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:11px;z-index:999}
+#ov h2{font-size:16px}
+#ov p{font-size:12px;color:var(--txt2);text-align:center;max-width:320px}
+.pb{width:240px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.pi{height:100%;background:var(--hl);border-radius:2px;width:0;transition:width .3s}
+
+</style></head><body>
+<div id="view-landing"><header id="lnd-header"><h1><span>&#127807;</span> &#31995;&#32113;&#22259; &#19968;&#35239;</h1><div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--txt3)">&#26356;&#26032;: 2026-03-25</span><button class="tb" id="btn-theme" onclick="toggleTheme()">&#127769;</button></div></header><main id="lnd-main"><div id="lnd-grid"></div></main><footer id="lnd-footer">&#12487;&#12540;&#12479;: Wikidata &nbsp;|&nbsp; &#29983;&#25104;: 2026-03-25</footer></div>
+<div id="view-tree">
+<button id="btn-back" onclick="goLanding()">&#8592; &#19968;&#35239;</button>
+<div id="loading"><div>&#127807; <strong id="loading-title"></strong></div><div id="loading-bar-outer"><div id="loading-bar"></div></div><div id="loading-msg">&#12487;&#12540;&#12479;&#12434;&#35501;&#12415;&#36796;&#12435;&#12391;&#12356;&#12414;&#12377;&#8230;</div></div>
 </div>
-</main>
-<footer>データ: Wikidata &nbsp;|&nbsp; 生成: 2026-03-25</footer>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <script>
-document.getElementById("gen-date").textContent = "更新: 2026-03-25";
+const TAXA_LIST = [{"qid": "Q193389", "name": "Clupeiformes", "ja": "ニシン目", "rank": "order", "rank_ja": "目", "sp": 1272, "fa": 11, "nodes": 1444, "date": "2026-03-24", "json": "taxa_cache_Q193389.json"}, {"qid": "Q25341", "name": "Passeriformes", "ja": "スズメ目", "rank": "order", "rank_ja": "目", "sp": 6138, "fa": 90, "nodes": 7223, "date": "2026-03-24", "json": "taxa_cache_Q25341.json"}, {"qid": "Q7380", "name": "Primates", "ja": "サル目", "rank": "order", "rank_ja": "目", "sp": 78, "fa": 27, "nodes": 229, "date": "2026-03-24", "json": "taxa_cache_Q7380.json"}];
+
 function toggleTheme(){
-  const h=document.documentElement,t=h.getAttribute("data-theme")==="dark"?"light":"dark";
+  const h=document.documentElement;
+  const t=h.getAttribute("data-theme")==="dark"?"light":"dark";
   h.setAttribute("data-theme",t);
-  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+  const btn=document.getElementById("btn-theme");
+  if(btn) btn.textContent=t==="dark"?"\u{1F319}":"\u2600\uFE0F";
   localStorage.setItem("taxa_theme",t);
 }
 (function(){
   const t=localStorage.getItem("taxa_theme")||"dark";
   document.documentElement.setAttribute("data-theme",t);
-  document.getElementById("btn-theme").textContent=t==="dark"?"🌙":"☀️";
+  const btn=document.getElementById("btn-theme");
+  if(btn) btn.textContent=t==="dark"?"\u{1F319}":"\u2600\uFE0F";
 })();
+
+function renderLanding(){
+  const grid=document.getElementById("lnd-grid");
+  if(!TAXA_LIST.length){
+    grid.innerHTML='<div class="empty"><p>\u{1F4C2} \u307E\u3060\u7CFB\u7D71\u56F3\u304C\u3042\u308A\u307E\u305B\u3093\u3002</p>'
+      +'<p style="margin-top:8px;font-size:12px">python taxa_tree.py --qid Q25341 \u3092\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002</p></div>';
+    return;
+  }
+  grid.innerHTML='<div class="grid">'
+    +TAXA_LIST.map(t=>{
+      const title=t.ja||t.name;
+      const sub=t.ja?`<div class="card-sci">${t.name}</div>`:"";
+      const badges=[
+        t.sp  ?`<span class="badge b-sp">\u{1F426} ${t.sp.toLocaleString()}\u7A2E</span>`:"",
+        t.fa  ?`<span class="badge b-fa">\u{1F3F7} ${t.fa.toLocaleString()}\u79D1</span>`:"",
+        t.nodes?`<span class="badge b-nd">\u{1F4E6} ${t.nodes.toLocaleString()}\u4EF6</span>`:"",
+        `<span class="badge b-dt">\u{1F4C5} ${t.date}</span>`,
+      ].join("");
+      return `<div class="card" onclick="goViewer('${t.qid}')" role="button" tabindex="0"
+          onkeydown="if(event.key==='Enter')goViewer('${t.qid}')">
+        <div class="card-rank">${t.rank_ja} ${t.qid}</div>
+        <div class="card-title">${title}</div>
+        ${sub}
+        <div class="card-meta">${badges}</div>
+        <div class="arrow">\u7CFB\u7D71\u56F3\u3092\u958B\u304F \u2192</div>
+      </div>`;
+    }).join("")+"</div>";
+}
+
+let DATA=null;
+function goLanding(){ location.hash=""; }
+function goViewer(qid){ location.hash=qid; }
+
+async function loadViewer(qid){
+  const taxa=TAXA_LIST.find(t=>t.qid===qid);
+  if(!taxa){ alert("QID "+qid+" \u306E\u30C7\u30FC\u30BF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093"); return; }
+  document.getElementById("view-landing").style.display="none";
+  document.getElementById("view-tree").style.display="block";
+  document.getElementById("loading").style.display="flex";
+  document.getElementById("loading-bar").style.width="0%";
+  document.getElementById("loading-title").textContent=taxa.ja||taxa.name;
+  document.getElementById("loading-msg").textContent="\u30C7\u30FC\u30BF\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u3044\u307E\u3059\u2026";
+  document.title=(taxa.ja||taxa.name)+" \u7CFB\u7D71\u56F3";
+  const ttlEl=document.getElementById("ttl");
+  if(ttlEl) ttlEl.innerHTML=`<em>${taxa.ja||taxa.name}</em>${taxa.ja?" ("+taxa.name+")":""} \u7CFB\u7D71\u56F3`;
+  const footEl=document.getElementById("foot");
+  if(footEl) footEl.textContent=`QID: ${taxa.qid} | \u753B\u50CF: Wikimedia Commons | \u751F\u6210: 2026-03-25`;
+  const bar=document.getElementById("loading-bar");
+  const msg=document.getElementById("loading-msg");
+  try{
+    const resp=await fetch(taxa.json);
+    if(!resp.ok) throw new Error("HTTP "+resp.status);
+    const total=parseInt(resp.headers.get("content-length")||"0");
+    const reader=resp.body.getReader();
+    let received=0; const chunks=[];
+    while(true){
+      const {done,value}=await reader.read();
+      if(done) break;
+      chunks.push(value); received+=value.length;
+      if(total>0&&bar) bar.style.width=Math.min(received/total*90,90)+"%";
+    }
+    if(msg) msg.textContent="\u63CF\u753B\u4E2D\u2026";
+    if(bar) bar.style.width="100%";
+    const size=chunks.reduce((a,b)=>a+b.length,0);
+    const merged=new Uint8Array(size);
+    let off=0;
+    for(const c of chunks){merged.set(c,off);off+=c.length;}
+    DATA=JSON.parse(new TextDecoder().decode(merged));
+    document.getElementById("loading").style.display="none";
+    if(typeof init==="function") init();
+  }catch(e){
+    if(msg) msg.textContent="\u8AAD\u307F\u8FBC\u307F\u5931\u6557: "+e.message;
+    console.error("JSON load error:",e);
+  }
+}
+
+function route(){
+  const qid=location.hash.slice(1);
+  if(qid) loadViewer(qid);
+  else{
+    document.getElementById("view-landing").style.display="block";
+    document.getElementById("view-tree").style.display="none";
+    document.title="\u7CFB\u7D71\u56F3";
+    renderLanding();
+  }
+}
+window.addEventListener("hashchange",route);
+window.addEventListener("load",()=>{renderLanding();route();});
+
 </script>
 </body></html>
