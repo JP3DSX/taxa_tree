@@ -54,7 +54,7 @@ html,body{height:100%;background:var(--bg);color:var(--txt);
   gap:14px;z-index:3000;font-size:13px;color:var(--txt2)}
 #loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
 #loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}
-#btn-back{position:fixed;top:10px;left:10px;z-index:2500;display:none;
+#btn-back{position:fixed;bottom:42px;left:9px;z-index:2500;display:none;
   background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);
   border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
   transition:border-color .15s,color .15s}
@@ -134,14 +134,23 @@ svg{width:100%;height:100%}
 .nd.strategy-gbif    .bg,.nd.strategy-gbif    .img-ring{stroke:#3b82f6!important}
 .nd.strategy-incomplete .bg{stroke:#ef4444!important;stroke-dasharray:3,2}
 /* ツールチップ */
+/* ── ツールチップ ── */
 #tt{position:absolute;background:var(--bg2);border:1px solid var(--brd);
   border-radius:10px;padding:0;pointer-events:auto;display:none;
-  width:220px;z-index:50;overflow:hidden;box-shadow:0 8px 28px rgba(0,0,0,.35)}
-#tt-img{width:220px;height:136px;object-fit:cover;display:block;background:var(--bg3)}
+  width:var(--tt-w,280px);z-index:50;overflow:hidden;
+  box-shadow:0 8px 28px rgba(0,0,0,.35);transition:width .1s}
+#tt-img{width:100%;height:auto;aspect-ratio:16/10;object-fit:cover;
+  display:block;background:var(--bg3)}
 #tt-img.hidden{display:none}
-#tt-ph{width:220px;height:136px;display:flex;align-items:center;justify-content:center;
-  font-size:30px;background:var(--bg3)}
+#tt-ph{width:100%;aspect-ratio:16/10;display:flex;align-items:center;
+  justify-content:center;font-size:30px;background:var(--bg3)}
 #tt-ph.hidden{display:none}
+/* サイズスライダー */
+#tt-sizer{width:100%;display:flex;align-items:center;gap:6px;
+  padding:6px 12px 8px;border-top:1px solid var(--brd)}
+#tt-sizer label{font-size:9px;color:var(--txt3);white-space:nowrap}
+#tt-sizer input[type=range]{flex:1;height:3px;accent-color:var(--hl);
+  cursor:pointer}
 #tt-body{padding:9px 12px}
 #tt-rank{font-size:10px;color:var(--txt3)}
 #tt-name{font-weight:600;font-size:12px;font-style:italic;
@@ -879,8 +888,32 @@ const tt = document.getElementById("tt");
 let currentTTNode = null;
 let _hideTimer = null;
 
+// ── ツールチップ幅の制御 ─────────────────────────────────────────
+let _ttW = parseInt(localStorage.getItem("taxa_tt_w") || "280");
+function setTTWidth(w) {
+  _ttW = w;
+  document.documentElement.style.setProperty("--tt-w", w + "px");
+  localStorage.setItem("taxa_tt_w", w);
+  // movTT で位置を再計算（幅が変わると右端で反転する閾値が変わるため）
+  if (currentTTNode && tt.style.display !== "none") {
+    const rect = tt.getBoundingClientRect();
+    const r    = mainEl.getBoundingClientRect();
+    const tx   = rect.left - r.left + rect.width / 2;
+    const ty   = rect.top  - r.top  + rect.height / 2;
+    const left = (tx + w + 20 > r.width) ? tx - w - 6 : tx + 6;
+    tt.style.left = left + "px";
+  }
+}
+// 起動時にサイズ復元
+(function() {
+  document.documentElement.style.setProperty("--tt-w", _ttW + "px");
+  const sl = document.getElementById("tt-size-slider");
+  if (sl) sl.value = _ttW;
+})();
+
 function schedulHide() {
-  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 220);
+  // 600ms 猶予: ノードからツールチップへの移動中に消えないよう延長
+  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 600);
 }
 function cancelHide() {
   if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
@@ -888,6 +921,18 @@ function cancelHide() {
 // ツールチップ上にマウスが来たら非表示タイマーをキャンセル
 tt.addEventListener("mouseenter", cancelHide);
 tt.addEventListener("mouseleave", schedulHide);
+
+// mainEl 上の mousemove: ツールチップ近傍（20px以内）なら hide をキャンセル
+// ノードとツールチップの間の空白を移動中に消えるのを防ぐ
+mainEl.addEventListener("mousemove", (e) => {
+  if (tt.style.display === "none" || !_hideTimer) return;
+  const tr = tt.getBoundingClientRect();
+  const margin = 24;
+  if (e.clientX >= tr.left - margin && e.clientX <= tr.right  + margin &&
+      e.clientY >= tr.top  - margin && e.clientY <= tr.bottom + margin) {
+    cancelHide();
+  }
+});
 
 // ─── 長押し（タッチデバイス） ────────────────────────────────────
 let _lpTimer  = null;   // 長押しタイマー
@@ -995,9 +1040,12 @@ function movTT(e) {
   const r  = mainEl.getBoundingClientRect();
   const tx = e.clientX - r.left;
   const ty = e.clientY - r.top;
-  const left = (tx + 235 > r.width) ? tx - 238 : tx + 14;
+  const w  = _ttW;
+  const left = (tx + w + 20 > r.width) ? tx - w - 6 : tx + 14;
   tt.style.left = left + "px";
-  tt.style.top  = Math.min(ty - 10, r.height - 270) + "px";
+  // 縦: ツールチップが画面下に出ない最大位置
+  const ttH = tt.offsetHeight || (w * 10 / 16 + 140);
+  tt.style.top  = Math.min(ty - 10, r.height - ttH - 10) + "px";
 }
 
 let rsz;
