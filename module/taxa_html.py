@@ -997,7 +997,7 @@ def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
     jf    = json_filename
     # ストリーミング fetch でプログレスバーを更新してから init()
     data_block = "\n".join([
-        "let DATA = null;",
+        "window.DATA = null;",
         "(async () => {",
         '  const bar = document.getElementById("loading-bar");',
         '  const msg = document.getElementById("loading-msg");',
@@ -1020,7 +1020,7 @@ def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
         "    const merged = new Uint8Array(size);",
         "    let off = 0;",
         "    for (const c of chunks) { merged.set(c, off); off += c.length; }",
-        "    DATA = JSON.parse(new TextDecoder().decode(merged));",
+        "    window.DATA = JSON.parse(new TextDecoder().decode(merged));",
         "    init();",
         "  } catch(e) {",
         '    if (msg) msg.textContent = "読み込み失敗: " + e.message;',
@@ -1126,7 +1126,7 @@ def make_index_html(output_dir) -> str:
     viewer_css = css_m.group(1) if css_m else ""
 
     # ── ビューワー BODY を抽出し SPA 用に調整 ────────────────────
-    body_m = re.search(r"<body>(.*?)</body>", HTML, re.DOTALL)
+    body_m = re.search(r"<body[^>]*>(.*?)</body>", HTML, re.DOTALL)
     viewer_body = body_m.group(1) if body_m else ""
     # D3 script タグを削除（SPA 側で1回だけ読み込む）
     viewer_body = re.sub(
@@ -1136,6 +1136,8 @@ def make_index_html(output_dir) -> str:
     # __DATA_BLOCK__ プレースホルダ → SPA ルーターが注入するためコメントに
     viewer_body = viewer_body.replace("__DATA_BLOCK__", "/* DATA injected by SPA router */")
     # タイトル等のプレースホルダ → SPA ルーターが動的に設定
+    # window.addEventListener("load", init) は SPA ルーターが制御するため削除
+    viewer_body = viewer_body.replace('window.addEventListener("load", init);', "")
     viewer_body = viewer_body.replace("__TITLE__", "").replace("__QID__", "").replace("__DATE__", date)
 
     # ── SPA HTML を組み立て ────────────────────────────────────────
@@ -1298,7 +1300,7 @@ function renderLanding(){
     }).join("")+"</div>";
 }
 
-let DATA=null;
+window.DATA=null;
 function goLanding(){ location.hash=""; }
 function goViewer(qid){ location.hash=qid; }
 
@@ -1336,7 +1338,7 @@ async function loadViewer(qid){
     const merged=new Uint8Array(size);
     let off=0;
     for(const c of chunks){merged.set(c,off);off+=c.length;}
-    DATA=JSON.parse(new TextDecoder().decode(merged));
+    window.DATA=JSON.parse(new TextDecoder().decode(merged));
     document.getElementById("loading").style.display="none";
     if(typeof init==="function") init();
   }catch(e){
