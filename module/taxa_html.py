@@ -60,6 +60,14 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
   border-radius:18px;padding:4px 11px;font-size:11px;width:140px;outline:none;
   transition:background .2s,border-color .15s}
 #srch:focus{border-color:var(--hl)}#srch::placeholder{color:var(--txt3)}
+#srch-btn{background:var(--hl);border:none;color:#000;border-radius:18px;
+  padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;
+  font-weight:600;transition:opacity .15s}
+#srch-btn:hover{opacity:.85}
+#srch-clr{background:transparent;border:1px solid var(--brd);color:var(--txt3);
+  border-radius:18px;padding:4px 8px;font-size:11px;cursor:pointer;
+  display:none}
+#srch-clr:hover{border-color:var(--txt2);color:var(--txt)}
 .hb,.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
   border-radius:13px;padding:3px 9px;font-size:11px;cursor:pointer;
   white-space:nowrap;transition:border-color .15s,color .15s,background .15s}
@@ -163,7 +171,10 @@ svg{width:100%;height:100%}
   <div class="pb"><div class="pi" id="pi"></div></div></div>
 <div id="hdr">
   <div id="ttl"><em>__TITLE__</em> 系統図</div>
-  <input id="srch" placeholder="検索…" oninput="doSrch(this.value)">
+  <input id="srch" placeholder="検索…"
+    onkeydown="if(event.key==='Enter')doSrch(document.getElementById('srch').value)">
+  <button id="srch-btn" onclick="doSrch(document.getElementById('srch').value)">🔍</button>
+  <button id="srch-clr" onclick="clearSrch()" title="検索をクリア">✕</button>
   <button class="hb" onclick="expandTo('family')">科まで</button>
   <button class="hb" onclick="expandTo('genus')">属まで</button>
   <button class="hb" onclick="expandTo('species')">全展開</button>
@@ -622,12 +633,20 @@ function walkAll(node, fn) {
   kids.forEach(c => walkAll(c, fn));
 }
 
+function clearSrch() {
+  document.getElementById("srch").value = "";
+  document.getElementById("srch-clr").style.display = "none";
+  g.selectAll(".nd").classed("nh", false).classed("nm", false);
+  update(root);
+}
+
 function doSrch(q) {
   const v = q.trim().toLowerCase();
+  // クリアボタンの表示切り替え
+  document.getElementById("srch-clr").style.display = v ? "inline-block" : "none";
   // ハイライトをリセット
   g.selectAll(".nd").classed("nh", false).classed("nm", false);
   if (!v) {
-    // 空文字ならリセットのみ
     update(root);
     return;
   }
