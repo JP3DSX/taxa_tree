@@ -918,7 +918,7 @@ function setTTWidth(w) {
 
 function schedulHide() {
   // 300ms 猶予: ノードからツールチップへの移動中に消えないよう確保
-  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 300);
+  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 450);
 }
 function cancelHide() {
   if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
@@ -932,7 +932,7 @@ tt.addEventListener("mouseleave", schedulHide);
 mainEl.addEventListener("mousemove", (e) => {
   if (tt.style.display === "none" || !_hideTimer) return;
   const tr = tt.getBoundingClientRect();
-  const margin = 10;
+  const margin = 18;
   if (e.clientX >= tr.left - margin && e.clientX <= tr.right  + margin &&
       e.clientY >= tr.top  - margin && e.clientY <= tr.bottom + margin) {
     cancelHide();
