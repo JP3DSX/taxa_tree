@@ -59,7 +59,7 @@ HEADERS  = {
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "1.6"
+FETCH_VERSION = "1.7"
 
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
@@ -517,10 +517,15 @@ def get_transitive_children(parent_qid: str,
 
     注意: P171+ は Wikidata SPARQL で最適化されており高速。
     """
-    stop_qid = {r: q for q, r in RANK_MAP.items()}.get(stop_rank, "")
+    # RANK_MAP は複数QIDが同一ランクに対応するため全QIDを収集
+    stop_qids = [q for q, r in RANK_MAP.items() if r == stop_rank]
     records   = []
     offset    = 0
-    rank_filter = (f"  ?child wdt:P105 wd:{stop_qid} .\n" if stop_qid else "")
+    if stop_qids:
+        qid_values = " ".join(f"wd:{q}" for q in stop_qids)
+        rank_filter = f"  ?child wdt:P105 ?stopRank . FILTER(?stopRank IN ({qid_values}))\n"
+    else:
+        rank_filter = ""
     while True:
         q = f"""
 SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
@@ -916,6 +921,8 @@ def _bfs_subtree(root_node: dict, nodes_dict: dict, stop_rank: str) -> int:
     stop_idx  = rank_index(stop_rank)
     root_ridx = rank_index(root_node["rank"])
     queue     = deque([(root_node["id"], root_ridx)])
+    # visited: このサブBFS内の既処理QID
+    # nodes_dict のキー集合も使って科をまたいだ重複を防ぐ
     visited   = {root_node["id"]}
     count     = 0
 
@@ -926,10 +933,16 @@ def _bfs_subtree(root_node: dict, nodes_dict: dict, stop_rank: str) -> int:
         parent_idx  = rank_index(parent_rank)
         if parent_idx >= stop_idx: continue
 
+        # visited に nodes_dict 登録済みQIDを追加（科をまたぐ重複防止）
+        visited |= nodes_dict.keys()
+
         child_nodes, strategy = get_children_with_supplement(
             parent_node, visited, stop_rank
         )
         for node in child_nodes:
+            # 二重チェック: nodes_dict にも既存チェック
+            if node["id"] in nodes_dict:
+                continue
             visited.add(node["id"])
             ci    = rank_index(node["rank"])
             depth = parent_depth + 1
