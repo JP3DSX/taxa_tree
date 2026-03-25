@@ -397,8 +397,11 @@ const lay  = d3.tree().nodeSize(layoutNodeSize());
 let root;
 
 const prog = (p, m) => {
-  document.getElementById("pi").style.width = p + "%";
-  if (m) document.getElementById("om").textContent = m;
+  // #pi / #om は standalone モードの #ov 内要素。SPA では存在しないため null ガード
+  const pi = document.getElementById("pi");
+  const om = document.getElementById("om");
+  if (pi) pi.style.width = p + "%";
+  if (om && m) om.textContent = m;
 };
 
 // ─── 初期化 ─────────────────────────────────────────────────────
@@ -435,7 +438,7 @@ function init() {
   prog(50, "描画中…"); update(root); prog(85, "調整中…");
   setTimeout(() => {
     fitV(true); prog(100, "完了");
-    setTimeout(() => document.getElementById("ov").style.display = "none", 250);
+    setTimeout(() => { const ov = document.getElementById("ov"); if (ov) ov.style.display = "none"; }, 250);
     updStat();
   }, 80);
 }
