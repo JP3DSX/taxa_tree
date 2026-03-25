@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-module/taxa_html.py  ─  HTML生成・UI モジュール
-================================================================
-インタラクティブ系統図の HTML テンプレートと生成関数を提供する。
+module/taxa_html.py  ─  HTML生成・UI モジュール  (HTML_VERSION 1.6)
+==================================================================
+インタラクティブ系統図 HTML のテンプレートと生成関数を提供する。
 データロジックには依存しない。
 
 公開 API:
-    make_html(tree: dict, root_qid: str) -> str
-        ツリー辞書から単体配布可能な HTML 文字列を生成して返す。
+    make_html(tree, root_qid) -> str
+        standalone モード: JSON を HTML に埋め込む（単体ファイル動作）
+    make_web_viewer(tree, root_qid, json_filename) -> str
+        web モード: JSON を外部 fetch で読み込む（GitHub Pages 用）
+    make_index_html(output_dir) -> str
+        SPA index.html を生成する（ランディング + ビューワー統合）
 """
 
-import json
-import re
+import json as _json
+import re as _re
 from datetime import datetime
+from pathlib import Path
 
-# HTML・UI モジュールのバージョン
-# テンプレート・CSS・JS など UI に変更があるたびにインクリメントする
 HTML_VERSION = "1.6"
+
+# ─────────────────────────────────────────────────────────────────
+#  HTML テンプレート（standalone / web 共通）
+#  プレースホルダ: __TITLE__ / __QID__ / __DATE__ / __DATA_BLOCK__
+# ─────────────────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
 <html lang="ja" data-theme="dark"><head>
@@ -53,6 +61,7 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
   touch-action:manipulation;
   font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif;
   transition:background .2s,color .2s}
+/* ── ヘッダー ── */
 #hdr{display:flex;align-items:center;gap:6px;padding:6px 10px;
   background:var(--bg2);border-bottom:1px solid var(--brd);flex-wrap:wrap}
 #ttl{font-size:13px;font-weight:600;white-space:nowrap}
@@ -62,12 +71,10 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
   transition:background .2s,border-color .15s}
 #srch:focus{border-color:var(--hl)}#srch::placeholder{color:var(--txt3)}
 #srch-btn{background:var(--hl);border:none;color:#000;border-radius:18px;
-  padding:4px 10px;font-size:11px;cursor:pointer;white-space:nowrap;
-  font-weight:600;transition:opacity .15s}
+  padding:4px 10px;font-size:11px;cursor:pointer;font-weight:600;transition:opacity .15s}
 #srch-btn:hover{opacity:.85}
 #srch-clr{background:transparent;border:1px solid var(--brd);color:var(--txt3);
-  border-radius:18px;padding:4px 8px;font-size:11px;cursor:pointer;
-  display:none}
+  border-radius:18px;padding:4px 8px;font-size:11px;cursor:pointer;display:none}
 #srch-clr:hover{border-color:var(--txt2);color:var(--txt)}
 .hb,.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
   border-radius:13px;padding:3px 9px;font-size:11px;cursor:pointer;
@@ -75,15 +82,25 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--txt);
 .hb:hover,.tb:hover{border-color:var(--txt2);color:var(--txt)}
 .tb.active{border-color:var(--hl);color:var(--hl);background:rgba(240,180,41,.08)}
 .ctrl{display:flex;gap:4px;padding-left:7px;border-left:1px solid var(--brd)}
-#stat{font-size:11px;color:var(--txt3);margin-left:auto;white-space:nowrap;display:flex;gap:9px}
+#stat{font-size:11px;color:var(--txt3);margin-left:auto;white-space:nowrap;
+  display:flex;gap:9px}
 .sd{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:2px}
+/* ── 凡例バー ── */
 #leg{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:3px 10px;
   background:var(--bg2);border-bottom:1px solid var(--brd);font-size:10px;color:var(--txt3)}
 .li{display:flex;align-items:center;gap:3px}
 .ld{width:7px;height:7px;border-radius:50%}
+/* IUCN 凡例（折りたたみ式） */
+#iucn-leg{display:none;gap:6px;flex-wrap:wrap;align-items:center}
+/* ツールチップ幅スライダー */
+#leg-sizer{display:flex;align-items:center;gap:5px;margin-left:auto}
+#leg-sizer label{font-size:9px;color:var(--txt3);white-space:nowrap}
+#leg-sizer input[type=range]{width:80px;height:3px;accent-color:var(--hl);cursor:pointer}
+/* ── メインエリア ── */
 #main{overflow:hidden;height:calc(100vh - 64px);position:relative}
 svg{width:100%;height:100%}
 .lk{fill:none;stroke:var(--brd);stroke-width:.7}
+/* ── ノード ── */
 .nd{cursor:pointer}
 .nd circle.bg{stroke-width:1.5;transition:r .12s,opacity .15s}
 .nd:hover circle.bg{filter:brightness(1.3)}
@@ -92,14 +109,21 @@ svg{width:100%;height:100%}
 .nd text{font-size:11px;fill:var(--txt);pointer-events:none;dominant-baseline:central}
 .primary-lbl{font-style:italic;fill:var(--txt2)!important}
 .secondary-lbl{font-size:9px;fill:var(--txt3)!important}
+/* ハイライト / ディム */
 .nh circle.bg,.nh .img-ring{stroke:var(--hl)!important;stroke-width:2.5!important}
 .nh text{fill:var(--hl)!important}
 .nm{opacity:.1}
-/* 補完取得ノードのバッジ */
+/* 補完ノードのバッジ */
 .nd.strategy-prefix .bg,.nd.strategy-prefix .img-ring{stroke:#f59e0b!important}
 .nd.strategy-gbif    .bg,.nd.strategy-gbif    .img-ring{stroke:#3b82f6!important}
 .nd.strategy-incomplete .bg{stroke:#ef4444!important;stroke-dasharray:3,2}
-/* ツールチップ */
+/* IUCN 保全状況: ノード外枠 */
+.nd.iucn-EX .bg,.nd.iucn-EX .img-ring{stroke:#6b7280!important;stroke-dasharray:4,2}
+.nd.iucn-EW .bg,.nd.iucn-EW .img-ring{stroke:#9ca3af!important;stroke-dasharray:4,2}
+.nd.iucn-CR .bg,.nd.iucn-CR .img-ring{stroke:#dc2626!important;stroke-width:2.5!important}
+.nd.iucn-EN .bg,.nd.iucn-EN .img-ring{stroke:#ea580c!important;stroke-width:2!important}
+.nd.iucn-VU .bg,.nd.iucn-VU .img-ring{stroke:#d97706!important}
+.nd.iucn-NT .bg,.nd.iucn-NT .img-ring{stroke:#65a30d!important}
 /* ── ツールチップ ── */
 #tt{position:absolute;background:var(--bg2);border:1px solid var(--brd);
   border-radius:10px;padding:0;pointer-events:auto;display:none;
@@ -111,11 +135,6 @@ svg{width:100%;height:100%}
 #tt-ph{width:100%;aspect-ratio:16/10;display:flex;align-items:center;
   justify-content:center;font-size:30px;background:var(--bg3)}
 #tt-ph.hidden{display:none}
-/* サイズスライダー（凡例バー内） */
-#leg-sizer{display:flex;align-items:center;gap:5px;margin-left:auto}
-#leg-sizer label{font-size:9px;color:var(--txt3);white-space:nowrap}
-#leg-sizer input[type=range]{width:80px;height:3px;accent-color:var(--hl);
-  cursor:pointer}
 #tt-body{padding:9px 12px}
 #tt-rank{font-size:10px;color:var(--txt3)}
 #tt-name{font-weight:600;font-size:12px;font-style:italic;
@@ -127,68 +146,54 @@ svg{width:100%;height:100%}
 #tt-cnt{white-space:nowrap}
 #tt-credit{font-size:9px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;max-width:130px;text-align:right}
+/* IUCN バッジ（ツールチップ内） */
+#tt-iucn{display:none;margin-top:6px;padding:3px 8px;border-radius:4px;
+  font-size:10px;font-weight:700;text-align:center;letter-spacing:.05em}
+/* ── メタデータフッター ── */
 #foot{position:absolute;bottom:7px;left:9px;font-size:10px;color:var(--txt3);
   background:var(--foot-bg);padding:4px 8px;border-radius:5px;
   border:1px solid var(--brd);line-height:1.8;pointer-events:none}
-/* ── モバイル専用スタイル ─────────────── */
-@media (pointer: coarse) {
-  /* ツールチップを画面中央下部に固定 */
-  #tt{
-    position:fixed !important;
-    left:50% !important;
-    transform:translateX(-50%);
-    bottom:12px !important;
-    top:auto !important;
-    width:min(320px, calc(100vw - 24px)) !important;
-    max-height:75vh;
-    overflow-y:auto;
-    box-shadow:0 -4px 24px rgba(0,0,0,.5);
-  }
-  /* 閉じるボタンを表示 */
-  #tt-close{ display:flex !important }
-  /* ノードのタップ領域を広げる */
-  .nd circle.bg{ stroke-width:2 }
-  /* 長押しフィードバック */
-  .nd.pressing circle.bg{
-    stroke:var(--hl) !important;
-    stroke-width:3 !important;
-    transition:stroke .1s,stroke-width .1s;
-  }
-  /* モバイルで画像を横幅いっぱいに */
-  #tt-img,#tt-ph{
-    width:100% !important;
-    height:160px !important;
-  }
-  /* Wikipedia ボタンをタップしやすく */
-  #tt-wiki-btn{
-    padding:10px 0 !important;
-    font-size:13px !important;
-  }
-  /* ヘッダーボタンを少し大きく */
-  .hb,.tb{ padding:5px 10px !important; font-size:12px !important; }
-}
+/* 一覧に戻るボタン */
+#btn-back{position:fixed;bottom:42px;left:9px;z-index:2500;display:none;
+  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+#btn-back:hover{border-color:var(--hl);color:var(--hl)}
+/* ── オーバーレイ（解析中） ── */
+#ov{position:fixed;inset:0;background:rgba(13,17,23,.97);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;
+  gap:11px;z-index:999}
+#ov h2{font-size:16px}
+#ov p{font-size:12px;color:var(--txt2);text-align:center;max-width:320px}
+.pb{width:240px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.pi{height:100%;background:var(--hl);border-radius:2px;width:0;transition:width .3s}
+/* ── ローディング（web モード） ── */
 #loading{position:fixed;inset:0;background:var(--bg);display:flex;
   flex-direction:column;align-items:center;justify-content:center;
   gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
 #loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
 #loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;
   transition:width .3s}
-#ov{position:fixed;inset:0;background:rgba(13,17,23,.97);display:flex;
-  flex-direction:column;align-items:center;justify-content:center;gap:11px;z-index:999}
-#ov h2{font-size:16px}
-#ov p{font-size:12px;color:var(--txt2);text-align:center;max-width:320px}
-.pb{width:240px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
-.pi{height:100%;background:var(--hl);border-radius:2px;width:0;transition:width .3s}
+/* ── モバイル専用 ── */
+@media (pointer: coarse) {
+  #tt{position:fixed !important;left:50% !important;transform:translateX(-50%);
+    bottom:12px !important;top:auto !important;
+    width:min(320px, calc(100vw - 24px)) !important;
+    max-height:75vh;overflow-y:auto;box-shadow:0 -4px 24px rgba(0,0,0,.5)}
+  #tt-close{display:flex !important}
+  .nd circle.bg{stroke-width:2}
+  .nd.pressing circle.bg{stroke:var(--hl)!important;stroke-width:3!important;
+    transition:stroke .1s,stroke-width .1s}
+  #tt-img,#tt-ph{width:100% !important;height:160px !important}
+  #tt-wiki-btn{padding:10px 0 !important;font-size:13px !important}
+  .hb,.tb{padding:5px 10px !important;font-size:12px !important}
+}
 </style></head>
 <body style="display:flex;flex-direction:column">
-<div id="loading">
-  <div>🌿 <strong>__TITLE__</strong> 系統図</div>
-  <div id="loading-bar-outer"><div id="loading-bar"></div></div>
-  <div id="loading-msg">データを読み込んでいます…</div>
-</div>
 <div id="ov"><h2>🌿 系統図を準備中…</h2>
   <p id="om">データ解析中</p>
-  <div class="pb"><div class="pi" id="pi"></div></div></div>
+  <div class="pb"><div class="pi" id="pi"></div></div>
+</div>
 <div id="hdr">
   <div id="ttl"><em>__TITLE__</em> 系統図</div>
   <input id="srch" placeholder="検索…"
@@ -204,20 +209,23 @@ svg{width:100%;height:100%}
     <button class="tb" id="btn-theme" onclick="toggleTheme()" title="テーマ切り替え">🌙</button>
   </div>
   <div class="ctrl">
-    <button class="tb active" id="btn-ja" onclick="setLang('ja')" title="日本語優先">JA</button>
-    <button class="tb"        id="btn-en" onclick="setLang('en')" title="英語優先">EN</button>
+    <button class="tb active" id="btn-ja" onclick="setLang('ja')">JA</button>
+    <button class="tb"        id="btn-en" onclick="setLang('en')">EN</button>
   </div>
   <div class="ctrl">
-    <button class="tb active" id="btn-lr" onclick="setLayout('lr')" title="左→右">LR</button>
-    <button class="tb"        id="btn-tb" onclick="setLayout('tb')" title="上→下">TB</button>
+    <button class="tb active" id="btn-lr" onclick="setLayout('lr')">LR</button>
+    <button class="tb"        id="btn-tb" onclick="setLayout('tb')">TB</button>
   </div>
   <div class="ctrl">
     <button class="tb active" id="btn-icon" onclick="toggleIcons()" title="画像アイコン ON/OFF">🖼</button>
   </div>
   <div class="ctrl">
-    <button class="tb active" id="btn-iucn-all"     onclick="setIucnFilter('all')" title="全て表示">全</button>
-    <button class="tb"        id="btn-iucn-no-ex"   onclick="setIucnFilter('no-extinct')" title="絶滅種を除外">絶滅除外</button>
-    <button class="tb"        id="btn-iucn-only-ex" onclick="setIucnFilter('only-extinct')" title="絶滅種のみ表示">絶滅のみ</button>
+    <button class="tb active" id="btn-iucn-all"
+      onclick="setIucnFilter('all')" title="全て表示">全</button>
+    <button class="tb" id="btn-iucn-no-ex"
+      onclick="setIucnFilter('no-extinct')" title="絶滅種を除外">絶滅除外</button>
+    <button class="tb" id="btn-iucn-only-ex"
+      onclick="setIucnFilter('only-extinct')" title="絶滅種のみ表示">絶滅のみ</button>
   </div>
   <div id="stat"></div>
 </div>
@@ -229,8 +237,28 @@ svg{width:100%;height:100%}
   <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>
   <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亜種</div>
   <span id="leg-hint" style="margin-left:7px">▶クリックで展開 ／ ドラッグ・ホイールでナビ</span>
+  <div id="iucn-leg">
+    <span style="color:var(--txt3)">IUCN:</span>
+    <span class="li" style="color:#dc2626">&#9632; CR</span>
+    <span class="li" style="color:#ea580c">&#9632; EN</span>
+    <span class="li" style="color:#d97706">&#9632; VU</span>
+    <span class="li" style="color:#65a30d">&#9632; NT</span>
+    <span class="li" style="color:#16a34a">&#9632; LC</span>
+    <span class="li" style="color:#6b7280">&#9632; EX</span>
+  </div>
+  <button id="iucn-leg-toggle"
+    style="background:transparent;border:1px solid var(--brd);color:var(--txt3);
+      border-radius:8px;padding:1px 6px;font-size:9px;cursor:pointer;
+      white-space:nowrap;margin-left:4px"
+    onclick="(function(){
+      const el=document.getElementById('iucn-leg');
+      const btn=document.getElementById('iucn-leg-toggle');
+      const show=el.style.display==='none'||el.style.display==='';
+      el.style.display=show?'flex':'none';
+      btn.textContent=show?'IUCN \u25b2':'IUCN \u25bc';
+    })()">IUCN &#9660;</button>
   <div id="leg-sizer">
-    <label>↔ TT</label>
+    <label>&#8596; TT</label>
     <input type="range" id="tt-size-slider"
       min="180" max="420" step="10" value="280"
       oninput="setTTWidth(+this.value)">
@@ -239,15 +267,15 @@ svg{width:100%;height:100%}
 <div id="main">
   <svg id="tree"></svg>
   <div id="tt">
-    <!-- 閉じるボタン（モバイルのみ表示） -->
     <div id="tt-close"
       style="display:none;justify-content:flex-end;padding:6px 8px 0;cursor:pointer"
       onclick="tt.style.display='none'">
-      <span style="font-size:18px;line-height:1;color:var(--txt3)">✕</span>
+      <span style="font-size:18px;line-height:1;color:var(--txt3)">&#10005;</span>
     </div>
     <img id="tt-img" src="" alt="" crossorigin="anonymous"
-         onerror="this.classList.add('hidden');document.getElementById('tt-ph').classList.remove('hidden')">
-    <div id="tt-ph" class="hidden">🌿</div>
+         onerror="this.classList.add('hidden');
+           document.getElementById('tt-ph').classList.remove('hidden')">
+    <div id="tt-ph" class="hidden">&#127807;</div>
     <div id="tt-body">
       <div id="tt-rank"></div>
       <div id="tt-name"></div>
@@ -256,13 +284,13 @@ svg{width:100%;height:100%}
         <span id="tt-cnt"></span>
         <span id="tt-credit"></span>
       </div>
+      <div id="tt-iucn"></div>
       <div id="tt-wiki" style="display:none;margin-top:6px">
         <button id="tt-wiki-btn"
           style="width:100%;padding:4px 0;font-size:10px;cursor:pointer;
             background:transparent;border:1px solid var(--brd);
             border-radius:6px;color:var(--hl);pointer-events:all"
-          onclick="openWiki(currentTTNode)">
-        </button>
+          onclick="openWiki(currentTTNode)"></button>
       </div>
     </div>
   </div>
@@ -270,11 +298,16 @@ svg{width:100%;height:100%}
 </div>
 <script>
 __DATA_BLOCK__
-const RANK_ORD=["domain","kingdom","subkingdom","phylum","subphylum","superclass",
+
+// ─── 定数 ──────────────────────────────────────────────────────────
+const RANK_ORD = [
+  "domain","kingdom","subkingdom","phylum","subphylum","superclass",
   "class","subclass","infraclass","superorder","order","suborder","infraorder",
   "superfamily","family","subfamily","tribe","subtribe","genus","subgenus",
-  "species","subspecies","variety","form"];
-const RC={domain:"var(--c-domain)",kingdom:"var(--c-kingdom)",phylum:"var(--c-phylum)",
+  "species","subspecies","variety","form"
+];
+const RC = {
+  domain:"var(--c-domain)",kingdom:"var(--c-kingdom)",phylum:"var(--c-phylum)",
   subphylum:"var(--c-phylum)",superclass:"var(--c-class)",class:"var(--c-class)",
   subclass:"var(--c-class)",infraclass:"var(--c-class)",
   superorder:"var(--c-order)",order:"var(--c-order)",suborder:"var(--c-suborder)",
@@ -283,36 +316,38 @@ const RC={domain:"var(--c-domain)",kingdom:"var(--c-kingdom)",phylum:"var(--c-ph
   tribe:"var(--c-tribe)",subtribe:"var(--c-tribe)",
   genus:"var(--c-genus)",subgenus:"var(--c-genus)",
   species:"var(--c-species)",subspecies:"var(--c-subspecies)",
-  variety:"var(--c-variety)",form:"var(--c-variety)",unknown:"var(--c-unknown)"};
-const RR_BASE={domain:10,kingdom:9,phylum:8,subphylum:7,superclass:7,class:7,
+  variety:"var(--c-variety)",form:"var(--c-variety)",unknown:"var(--c-unknown)"
+};
+const RR_BASE = {
+  domain:10,kingdom:9,phylum:8,subphylum:7,superclass:7,class:7,
   subclass:6,infraclass:6,superorder:6,order:6,suborder:5,infraorder:5,
   superfamily:5,family:4.5,subfamily:4,tribe:3.5,subtribe:3.5,
-  genus:3,subgenus:3,species:2,subspecies:1.8,variety:1.8,form:1.8,unknown:2};
-const IMG_R = 11;   // 画像アイコン半径(px)
-const RJ={domain:"域",kingdom:"界",subkingdom:"亜界",phylum:"門",subphylum:"亜門",
+  genus:3,subgenus:3,species:2,subspecies:1.8,variety:1.8,form:1.8,unknown:2
+};
+const RJ = {
+  domain:"域",kingdom:"界",subkingdom:"亜界",phylum:"門",subphylum:"亜門",
   superclass:"上綱",class:"綱",subclass:"亜綱",infraclass:"下綱",
   superorder:"上目",order:"目",suborder:"亜目",infraorder:"下目",
   superfamily:"上科",family:"科",subfamily:"亜科",tribe:"族",subtribe:"亜族",
   genus:"属",subgenus:"亜属",species:"種",subspecies:"亜種",
-  variety:"変種",form:"品種",unknown:"?"};
+  variety:"変種",form:"品種",unknown:"?"
+};
+const IMG_R = 11;   // 画像アイコン半径(px)
 
-// ─── 状態 ────────────────────────────────────────────────────────
+// ─── 状態 ──────────────────────────────────────────────────────────
 let langMode   = localStorage.getItem("taxa_lang")   || "ja";
 let layoutMode = localStorage.getItem("taxa_layout") || "lr";
 let showIcons  = localStorage.getItem("taxa_icons")  !== "0";
 
-// 画像ありの種ノードに使う実効半径
 function nodeR(d) {
   if (showIcons && d.data.image_url &&
       ["species","subspecies","variety","form"].includes(d.data.rank))
     return IMG_R;
   return RR_BASE[d.data.rank] || 2;
 }
-// テキスト X オフセット（画像ノードは半径が大きい分ずらす）
 function textX(d) {
-  const r  = nodeR(d);
-  const lx = hk(d) ? -(r + 5) : (r + 5);
-  return lx;
+  const r = nodeR(d);
+  return hk(d) ? -(r + 5) : (r + 5);
 }
 
 // ─── 言語ヘルパー ─────────────────────────────────────────────────
@@ -324,22 +359,26 @@ function getLabels(d) {
     : { primary: sci,       secondary: ja };
 }
 
-// ─── テキスト属性（LR / TB 共通ヘルパー） ─────────────────────────
+// ─── テキスト属性 ─────────────────────────────────────────────────
 function applyPrimaryAttrs(sel) {
   sel.attr("transform",    d => tbEnTransform(d, false))
      .attr("writing-mode", () => tbJaWritingMode())
-     .attr("x",            d => layoutMode === "lr" ? textX(d) : (langMode === "ja" ? (hk(d) ? -4 : 4) : 0))
-     .attr("y",            d => layoutMode !== "tb" ? null : (langMode === "ja" ? (hk(d) ? -nodeR(d)-3 : nodeR(d)+3) : nodeR(d)+2))
-     .attr("dy",           () => layoutMode === "lr" ? "0em" : null)
-     .attr("text-anchor",  d => primaryAnchor(d));
+     .attr("x", d => layoutMode === "lr" ? textX(d)
+       : (langMode === "ja" ? (hk(d) ? -4 : 4) : 0))
+     .attr("y", d => layoutMode !== "tb" ? null
+       : (langMode === "ja" ? (hk(d) ? -nodeR(d)-3 : nodeR(d)+3) : nodeR(d)+2))
+     .attr("dy",          () => layoutMode === "lr" ? "0em" : null)
+     .attr("text-anchor", d => primaryAnchor(d));
 }
 function applySecondaryAttrs(sel) {
   sel.attr("transform",    d => tbEnTransform(d, true))
      .attr("writing-mode", () => tbJaWritingMode())
-     .attr("x",            d => layoutMode === "lr" ? textX(d) : (langMode === "ja" ? (hk(d) ? -14 : 14) : 0))
-     .attr("y",            d => layoutMode !== "tb" ? null : (langMode === "ja" ? (hk(d) ? -nodeR(d)-3 : nodeR(d)+3) : nodeR(d)+14))
-     .attr("dy",           () => layoutMode === "lr" ? "1.5em" : null)
-     .attr("text-anchor",  d => primaryAnchor(d));
+     .attr("x", d => layoutMode === "lr" ? textX(d)
+       : (langMode === "ja" ? (hk(d) ? -14 : 14) : 0))
+     .attr("y", d => layoutMode !== "tb" ? null
+       : (langMode === "ja" ? (hk(d) ? -nodeR(d)-3 : nodeR(d)+3) : nodeR(d)+14))
+     .attr("dy",          () => layoutMode === "lr" ? "1.5em" : null)
+     .attr("text-anchor", d => primaryAnchor(d));
 }
 function tbEnTransform(d, isSec) {
   if (layoutMode !== "tb" || langMode !== "en") return null;
@@ -354,15 +393,14 @@ function primaryAnchor(d) {
   return hk(d) ? "start" : "end";
 }
 
-// ─── テーマ切り替え ───────────────────────────────────────────────
+// ─── テーマ・言語・レイアウト・アイコン ─────────────────────────
 function toggleTheme() {
-  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  const next = document.documentElement.getAttribute("data-theme") === "dark"
+    ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", next);
   document.getElementById("btn-theme").textContent = next === "dark" ? "🌙" : "☀️";
   localStorage.setItem("taxa_theme", next);
 }
-
-// ─── 言語切り替え ─────────────────────────────────────────────────
 function setLang(mode) {
   langMode = mode;
   localStorage.setItem("taxa_lang", mode);
@@ -378,8 +416,6 @@ function applyLangOnly() {
     d3.select(this).select(".secondary-lbl").text(lb.secondary);
   });
 }
-
-// ─── レイアウト切り替え ───────────────────────────────────────────
 function setLayout(mode) {
   layoutMode = mode;
   localStorage.setItem("taxa_layout", mode);
@@ -392,8 +428,6 @@ function setLayout(mode) {
 function layoutNodeSize() {
   return layoutMode === "lr" ? [18, 200] : [110, 75];
 }
-
-// ─── 画像アイコン切り替え ────────────────────────────────────────
 function toggleIcons() {
   showIcons = !showIcons;
   localStorage.setItem("taxa_icons", showIcons ? "1" : "0");
@@ -416,19 +450,17 @@ const lay  = d3.tree().nodeSize(layoutNodeSize());
 let root;
 
 const prog = (p, m) => {
-  // #pi / #om は standalone モードの #ov 内要素。SPA では存在しないため null ガード
   const pi = document.getElementById("pi");
   const om = document.getElementById("om");
   if (pi) pi.style.width = p + "%";
   if (om && m) om.textContent = m;
 };
 
-// ─── 初期化 ─────────────────────────────────────────────────────
+// ─── 初期化 ──────────────────────────────────────────────────────
 function init() {
   const savedTheme  = localStorage.getItem("taxa_theme")  || "dark";
-  const savedLayout = localStorage.getItem("taxa_layout") || "lr";
   langMode   = localStorage.getItem("taxa_lang")   || "ja";
-  layoutMode = savedLayout;
+  layoutMode = localStorage.getItem("taxa_layout") || "lr";
   showIcons  = localStorage.getItem("taxa_icons")  !== "0";
 
   document.documentElement.setAttribute("data-theme", savedTheme);
@@ -441,28 +473,34 @@ function init() {
   document.getElementById("srch").placeholder = langMode === "ja" ? "検索…" : "Search…";
   lay.nodeSize(layoutNodeSize());
 
-  // モバイルは凡例テキストをタッチ向けに変更
   if (isTouchDev) {
-    const hint = document.getElementById('leg-hint');
-    if (hint) hint.textContent = '▶タップで展開 ／ 長押しで詳細（Wikipedia）';
+    const hint = document.getElementById("leg-hint");
+    if (hint) hint.textContent = "▶タップで展開 ／ 長押しで詳細";
   }
 
   prog(20, "ツリー解析中…");
-  root = d3.hierarchy(DATA); root.x0 = 0; root.y0 = 0;
+  root = d3.hierarchy(DATA);
+  root.x0 = 0; root.y0 = 0;
   const genusIdx = RANK_ORD.indexOf("genus");
   root.descendants().forEach(d => {
     const ri = RANK_ORD.indexOf(d.data.rank);
     if (ri >= genusIdx && d.children) { d._children = d.children; d.children = null; }
   });
-  prog(50, "描画中…"); update(root); prog(85, "調整中…");
+  prog(50, "描画中…");
+  update(root);
+  prog(85, "調整中…");
   setTimeout(() => {
-    fitV(true); prog(100, "完了");
-    setTimeout(() => { const ov = document.getElementById("ov"); if (ov) ov.style.display = "none"; }, 250);
+    fitV(true);
+    prog(100, "完了");
+    setTimeout(() => {
+      const ov = document.getElementById("ov");
+      if (ov) ov.style.display = "none";
+    }, 250);
     updStat();
   }, 80);
 }
 
-// ─── clipPath プール（種ごとに1つ、再生成しない） ─────────────────
+// ─── clipPath プール ──────────────────────────────────────────────
 const _clipCreated = new Set();
 function ensureClip(qid) {
   const cid = `clip-${qid}`;
@@ -473,77 +511,62 @@ function ensureClip(qid) {
   return cid;
 }
 
-// ─── ツリー更新 ─────────────────────────────────────────────────
+// ─── ツリー更新 ──────────────────────────────────────────────────
 function update(src) {
-  const W = mainEl.clientWidth, H = mainEl.clientHeight;
+  const W  = mainEl.clientWidth, H = mainEl.clientHeight;
+  const tr = d3.transition().duration(220);
+  const sx = layoutMode === "lr" ? src.x : src.y;
+  const sy = layoutMode === "lr" ? src.y : src.x;
+
   svg.attr("width", W).attr("height", H);
   lay(root);
-  const dur = 220, tr = d3.transition().duration(dur).ease(d3.easeCubicOut);
-
-  const [sy, sx] = layoutMode === "lr"
-    ? [src.y0 ?? src.y, src.x0 ?? src.x]
-    : [src.x0 ?? src.x, src.y0 ?? src.y];
 
   // リンク
   const lk = g.selectAll(".lk").data(root.links(), d => d.target.data.id);
-  lk.enter().append("path").attr("class","lk").attr("d", _ => dO(sy, sx))
-    .merge(lk).transition(tr).attr("d", d => linkPath(d.source, d.target));
-  lk.exit().transition(tr)
-    .attr("d", _ => dO(layoutMode==="lr"?src.y:src.x, layoutMode==="lr"?src.x:src.y))
-    .remove();
+  lk.enter().append("path").attr("class","lk")
+    .attr("d", () => dO(sx, sy))
+    .merge(lk).transition(tr)
+    .attr("d", d => linkPath(d.source, d.target));
+  lk.exit().transition(tr).attr("d", () => dO(sx, sy)).remove();
 
   // ノード
   const nd = g.selectAll(".nd").data(root.descendants(), d => d.data.id);
   const ne = nd.enter().append("g")
     .attr("class", d => {
+      const parts = ["nd"];
       const s = d.data.fetch_strategy;
-      if (s === 'prefix')     return 'nd strategy-prefix';
-      if (s === 'gbif')       return 'nd strategy-gbif';
-      if (s === 'incomplete') return 'nd strategy-incomplete';
-      return 'nd';
+      if (s === "prefix")          parts.push("strategy-prefix");
+      else if (s === "gbif")       parts.push("strategy-gbif");
+      else if (s === "incomplete") parts.push("strategy-incomplete");
+      if (d.data.iucn) parts.push("iucn-" + d.data.iucn);
+      return parts.join(" ");
     })
     .attr("transform", _ => `translate(${sy},${sx})`)
     .on("click", (e, d) => {
-      if (isTouchDev) return; // タッチは touchend で処理
+      if (isTouchDev) return;
       const isLeaf = ["species","subspecies","variety","form"].includes(d.data.rank);
-      if (isLeaf && !d.children && !d._children) {
-        openWiki(d);
-      } else {
-        tog(d); update(d);
-      }
+      if (isLeaf && !d.children && !d._children) { openWiki(d); }
+      else { tog(d); update(d); }
       e.stopPropagation();
     })
-    // ── マウスイベント（非タッチデバイスのみ有効） ──
     .on("mouseover", (e, d) => { if (!isTouchDev) showTT(e, d); })
     .on("mousemove", (e, d) => { if (!isTouchDev) movTT(e); })
     .on("mouseout",  ()     => { if (!isTouchDev) schedulHide(); })
-    // ── タッチイベント（タッチデバイスのみ有効） ──
-    .on("touchstart", (e, d) => {
-      e.stopPropagation();
-      startLongPress(e, d);
-    }, {passive: true})
-    .on("touchend", (e, d) => {
-      e.stopPropagation();
-      endTouch(e, d);
-    })
-    .on("touchmove", (e, d) => {
-      cancelLongPress(); // スクロール中は長押し解除
-    }, {passive: true});
+    .on("touchstart", (e, d) => { e.stopPropagation(); startLongPress(e, d); }, {passive: true})
+    .on("touchend",   (e, d) => { e.stopPropagation(); endTouch(e, d); })
+    .on("touchmove",  ()     => { cancelLongPress(); }, {passive: true});
 
-  // 背景円
   ne.append("circle").attr("class","bg").attr("r", 0)
     .attr("fill",         d => RC[d.data.rank] || RC.unknown)
     .attr("stroke",       d => RC[d.data.rank] || RC.unknown)
     .attr("fill-opacity", d => d._children ? .35 : 1);
 
-  // 画像要素（種 + image_url があるノード）
   ne.each(function(d) {
     if (!d.data.image_url) return;
     const sel = d3.select(this);
     const cid = ensureClip(d.data.id);
     sel.append("image").attr("class","species-img")
-      .attr("href", "")                    // 初期は空→レイジーロード
-      .attr("data-src", d.data.image_url)  // 実URLはdata-srcに保持
+      .attr("href", "").attr("data-src", d.data.image_url)
       .attr("crossOrigin", "anonymous")
       .attr("x", -IMG_R).attr("y", -IMG_R)
       .attr("width", IMG_R*2).attr("height", IMG_R*2)
@@ -555,7 +578,6 @@ function update(src) {
       .attr("stroke", RC[d.data.rank] || RC.unknown);
   });
 
-  // テキスト
   const nePri = ne.append("text").attr("class","primary-lbl")
     .text(d => getLabels(d).primary);
   applyPrimaryAttrs(nePri);
@@ -564,39 +586,34 @@ function update(src) {
     .text(d => getLabels(d).secondary);
   applySecondaryAttrs(neSec);
 
-  // マージ
   const nm = ne.merge(nd);
   nm.transition(tr).attr("transform", d => nodeTransform(d));
-
-  // 背景円（画像ありのとき r=0 に縮小して隠す）
   nm.select("circle.bg").transition(tr)
     .attr("r", d => (showIcons && d.data.image_url) ? 0 : (RR_BASE[d.data.rank] || 2))
-    .attr("fill",   d => RC[d.data.rank] || RC.unknown)
-    .attr("stroke", d => RC[d.data.rank] || RC.unknown)
+    .attr("fill",         d => RC[d.data.rank] || RC.unknown)
+    .attr("stroke",       d => RC[d.data.rank] || RC.unknown)
     .attr("fill-opacity", d => d._children ? .35 : 1);
-
-  // 画像フェードイン / アウト
   nm.select("image.species-img").transition(tr)
     .attr("opacity", d => (showIcons && d.data.image_url) ? 1 : 0);
   nm.select("circle.img-ring").transition(tr)
     .attr("r",       d => (showIcons && d.data.image_url) ? IMG_R + 1.5 : 0)
     .attr("opacity", d => (showIcons && d.data.image_url) ? 0.9 : 0);
-
-  // テキスト更新
   applyPrimaryAttrs(nm.select(".primary-lbl").text(d => getLabels(d).primary));
   applySecondaryAttrs(nm.select(".secondary-lbl").text(d => getLabels(d).secondary));
 
   nd.exit().transition(tr)
-    .attr("transform", _ => `translate(${layoutMode==="lr"?src.y:src.x},${layoutMode==="lr"?src.x:src.y})`)
+    .attr("transform", _ =>
+      `translate(${layoutMode==="lr"?src.y:src.x},${layoutMode==="lr"?src.x:src.y})`)
     .style("opacity", 0).remove();
   root.descendants().forEach(d => { d.x0 = d.x; d.y0 = d.y; });
-  // 再描画後: デバウンスタイマー経由で画像ロードをスケジュール
   scheduleImageLoad();
 }
 
 // ─── レイアウト補助 ───────────────────────────────────────────────
 function nodeTransform(d) {
-  return layoutMode === "lr" ? `translate(${d.y},${d.x})` : `translate(${d.x},${d.y})`;
+  return layoutMode === "lr"
+    ? `translate(${d.y},${d.x})`
+    : `translate(${d.x},${d.y})`;
 }
 function linkPath(s, t) {
   if (layoutMode === "lr") {
@@ -613,15 +630,16 @@ function dO(a, b) {
 }
 const hk  = d => d.children || d._children;
 const tog = d => {
-  if (d.children) { d._children = d.children;  d.children  = null; }
-  else            { d.children  = d._children;  d._children = null; }
+  if (d.children) { d._children = d.children; d.children = null; }
+  else            { d.children = d._children; d._children = null; }
 };
+
 function expandTo(rank) {
   const ti = RANK_ORD.indexOf(rank); if (ti < 0) return;
   root.descendants().forEach(d => {
     const di = RANK_ORD.indexOf(d.data.rank);
-    if (di < ti && d._children) { d.children  = d._children; d._children = null; }
-    if (di >= ti && d.children) { d._children = d.children;  d.children  = null; }
+    if (di < ti && d._children) { d.children = d._children; d._children = null; }
+    if (di >= ti && d.children) { d._children = d.children; d.children = null; }
   });
   update(root); updStat();
 }
@@ -637,7 +655,9 @@ function fitV(instant) {
   if (!bb.width || !bb.height) return;
   const sc = Math.min(W / (bb.width + 80), H / (bb.height + 80), 1.2);
   const t  = d3.zoomIdentity
-    .translate(W/2 - sc*(bb.x + bb.width/2), H/2 - sc*(bb.y + bb.height/2)).scale(sc);
+    .translate(W/2 - sc*(bb.x + bb.width/2),
+               H/2 - sc*(bb.y + bb.height/2))
+    .scale(sc);
   if (instant) svg.call(zm.transform, t);
   else         svg.transition().duration(500).call(zm.transform, t);
 }
@@ -653,274 +673,176 @@ function updStat() {
     `<span><span class="sd" style="background:var(--c-family)"></span>${fa.toLocaleString()}科</span>`+
     (im ? `<span style="color:var(--txt3);font-size:10px">📷${im.toLocaleString()}</span>` : "");
 }
-const cntSp = d => {
-  if (!d.children && !d._children)
-    return ["species","subspecies","variety","form"].includes(d.data.rank) ? 1 : 0;
-  return (d.children ?? d._children ?? []).reduce((s, c) => s + cntSp(c), 0);
-};
 
-
-// ─── IUCN フィルター ────────────────────────────────────────────────
-let iucnFilter = 'all';   // 'all' | 'no-extinct' | 'only-extinct'
-const EXTINCT_CODES = new Set(['EX', 'EW']);
+// ─── IUCN フィルター ──────────────────────────────────────────────
+let iucnFilter = "all";   // "all" | "no-extinct" | "only-extinct"
+const EXTINCT_CODES = new Set(["EX", "EW"]);
 
 function setIucnFilter(mode) {
   iucnFilter = mode;
-  [['btn-iucn-all','all'],['btn-iucn-no-ex','no-extinct'],['btn-iucn-only-ex','only-extinct']]
+  [["btn-iucn-all","all"],["btn-iucn-no-ex","no-extinct"],["btn-iucn-only-ex","only-extinct"]]
     .forEach(([id, m]) => {
       const el = document.getElementById(id);
-      if (el) el.classList.toggle('active', m === mode);
+      if (el) el.classList.toggle("active", m === mode);
     });
   applyIucnFilter();
 }
-
 function applyIucnFilter() {
-  if (iucnFilter === 'all') {
-    // 検索ハイライトを残しつつフィルター解除
-    if (!document.getElementById('srch').value.trim()) {
-      g.selectAll('.nd').classed('nm', false);
+  if (iucnFilter === "all") {
+    if (!document.getElementById("srch").value.trim()) {
+      g.selectAll(".nd").classed("nm", false);
     } else {
-      doSrch(document.getElementById('srch').value);
+      doSrch(document.getElementById("srch").value);
       return;
     }
     updStat();
     return;
   }
-
   const show = new Set();
   walkAll(root, d => {
-    const ic = d.data.iucn || '';
+    const ic = d.data.iucn || "";
     const isExtinct = EXTINCT_CODES.has(ic);
-    const match = (iucnFilter === 'no-extinct') ? !isExtinct : isExtinct;
+    const match = (iucnFilter === "no-extinct") ? !isExtinct : isExtinct;
     if (match) {
       show.add(d.data.id);
       let p = d.parent;
       while (p) { show.add(p.data.id); p = p.parent; }
     }
   });
-
-  g.selectAll('.nd').classed('nm', d => !show.has(d.data.id));
+  g.selectAll(".nd").classed("nm", d => !show.has(d.data.id));
   updStat();
 }
 
-// ─── 検索 ─────────────────────────────────────────────────────────
-// _children を含むツリー全ノードを走査するヘルパー
+// ─── 検索 ────────────────────────────────────────────────────────
 function walkAll(node, fn) {
   fn(node);
   const kids = node.children || node._children || [];
   kids.forEach(c => walkAll(c, fn));
 }
-
 function clearSrch() {
   document.getElementById("srch").value = "";
   document.getElementById("srch-clr").style.display = "none";
   g.selectAll(".nd").classed("nh", false).classed("nm", false);
   update(root);
 }
-
 function doSrch(q) {
   const v = q.trim().toLowerCase();
-  // クリアボタンの表示切り替え
   document.getElementById("srch-clr").style.display = v ? "inline-block" : "none";
-  // ハイライトをリセット
   g.selectAll(".nd").classed("nh", false).classed("nm", false);
-  if (!v) {
-    update(root);
-    return;
-  }
+  if (!v) { update(root); return; }
 
-  const hit      = new Set(); // ヒットノードおよびその祖先
-  const hitDirect = new Set(); // ヒットしたノード自身
-
-  // _children を含む全ノードを走査
+  const hit       = new Set();
+  const hitDirect = new Set();
   walkAll(root, d => {
     const name = (d.data.name || "").toLowerCase();
     const ja   = (d.data.ja   || "").toLowerCase();
     if (name.includes(v) || ja.includes(v)) {
       hitDirect.add(d.data.id);
       hit.add(d.data.id);
-      // 祖先パスをすべて展開してマーク
       let p = d.parent;
       while (p) {
         hit.add(p.data.id);
-        // 折りたたまれていたら展開
-        if (p._children) {
-          p.children  = p._children;
-          p._children = null;
-        }
+        if (p._children) { p.children = p._children; p._children = null; }
         p = p.parent;
       }
     }
   });
-
-  // ヒットしたノードの子孫も展開（ヒットノード自体の下も見せる）
   walkAll(root, d => {
     if (hitDirect.has(d.data.id) && d._children) {
-      d.children  = d._children;
-      d._children = null;
+      d.children = d._children; d._children = null;
     }
   });
-
-  // ツリーを再描画してハイライトを適用
   update(root);
-
   g.selectAll(".nd")
     .classed("nh", d => hitDirect.has(d.data.id))
     .classed("nm", d => !hit.has(d.data.id));
-
-  // ヒットノードが画面内に入るよう自動フィット
-  if (hit.size > 0) {
-    setTimeout(() => fitV(false), 260);
-  }
+  if (hit.size > 0) setTimeout(() => fitV(false), 260);
 }
 
-// ─── 画像レイジーロード（ズーム閾値 + デバウンス + レートキュー）─────
-//
-// 3段構えで Wikimedia CDN への 429 を防ぐ
-//
-//  段1: ズーム閾値
-//       scale < IMG_ZOOM_MIN の場合はリクエストしない
-//       （全体俯瞰中にノードが小さすぎる→画像不要）
-//
-//  段2: デバウンス
-//       ズーム倍率が変わってから IMG_DEBOUNCE_MS ms 後に処理開始
-//       ドラッグ・ピンチ操作中は何もしない
-//
-//  段3: レートリミットキュー
-//       IMG_RATE_PER_SEC リクエスト/秒 に上限を設ける
-//       キューに積んで順次送出
+// ─── 画像レイジーロード（ズーム閾値 + デバウンス + レートキュー）─
+const IMG_ZOOM_MIN     = 0.35;
+const IMG_DEBOUNCE_MS  = 1500;
+const IMG_RATE_PER_SEC = 4;
 
-const IMG_ZOOM_MIN    = 0.35;   // この倍率未満では画像ロードしない
-const IMG_DEBOUNCE_MS = 1500;   // ズーム操作停止後に待つ時間(ms)
-const IMG_RATE_PER_SEC = 4;     // 1秒あたりの最大リクエスト数
-
-// ── キュー本体 ────────────────────────────────────────────────────
-const _imgQueue   = [];         // 未ロード URL のキュー [{el, src}]
-let   _queueTimer = null;       // キュー処理のインターバルタイマー
+const _imgQueue = [];
+let   _queueTimer = null;
 
 function _startQueue() {
   if (_queueTimer) return;
   _queueTimer = setInterval(() => {
     if (_imgQueue.length === 0) {
-      clearInterval(_queueTimer);
-      _queueTimer = null;
-      return;
+      clearInterval(_queueTimer); _queueTimer = null; return;
     }
-    // 1 tick に IMG_RATE_PER_SEC 件まで送出
-    const batch = _imgQueue.splice(0, IMG_RATE_PER_SEC);
-    batch.forEach(({el, src}) => {
+    _imgQueue.splice(0, IMG_RATE_PER_SEC).forEach(({el, src}) => {
       if (!el.attr("href")) el.attr("href", src);
     });
   }, 1000);
 }
-
 function _enqueueVisible() {
-  const t       = d3.zoomTransform(svg.node());
-  const scale   = t.k;
-  const svgRect = mainEl.getBoundingClientRect();
-
-  // 段1: ズーム閾値チェック
-  if (scale < IMG_ZOOM_MIN) return;
-
+  const t     = d3.zoomTransform(svg.node());
+  if (t.k < IMG_ZOOM_MIN) return;
+  const svgR  = mainEl.getBoundingClientRect();
   g.selectAll("image.species-img").each(function() {
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    if (!src || el.attr("href")) return; // ロード済み or URL なし
-    // 既にキューに入っているか確認
+    if (!src || el.attr("href")) return;
     if (_imgQueue.some(q => q.src === src)) return;
-
-    // ノード座標 → 画面座標に変換
-    const parent = this.parentNode;
-    if (!parent) return;
-    const nd = d3.select(parent).datum();
+    const nd = d3.select(this.parentNode).datum();
     if (!nd) return;
     const sx = layoutMode === "lr" ? nd.y : nd.x;
     const sy = layoutMode === "lr" ? nd.x : nd.y;
-    const px = t.applyX(sx);
-    const py = t.applyY(sy);
-
-    // 画面内（マージン付き）のノードをキューに追加
-    const margin = 100;
-    if (px > -margin && px < svgRect.width  + margin &&
-        py > -margin && py < svgRect.height + margin) {
+    const px = t.applyX(sx), py = t.applyY(sy);
+    const m  = 100;
+    if (px > -m && px < svgR.width+m && py > -m && py < svgR.height+m) {
       _imgQueue.push({el, src});
     }
   });
-
   _startQueue();
 }
-
-// ── デバウンスラッパー ────────────────────────────────────────────
 let _imgDebounce = null;
-
 function scheduleImageLoad() {
   clearTimeout(_imgDebounce);
   _imgDebounce = setTimeout(_enqueueVisible, IMG_DEBOUNCE_MS);
 }
+zm.on("zoom.lazyimg", () => clearTimeout(_imgDebounce));
+zm.on("end.lazyimg",  scheduleImageLoad);
 
-// zoom 変化時: デバウンスタイマーをリセット
-zm.on("zoom.lazyimg",  () => clearTimeout(_imgDebounce));
-// zoom 終了時: デバウンス開始
-zm.on("end.lazyimg",   scheduleImageLoad);
-
-// ─── デバイス判定 ───────────────────────────────────────────────
-const isTouchDev = window.matchMedia('(pointer: coarse)').matches;
+// ─── デバイス判定 ────────────────────────────────────────────────
+const isTouchDev = window.matchMedia("(pointer: coarse)").matches;
 
 // ─── Wikipedia リンク ────────────────────────────────────────────
 function openWiki(d) {
-  const sci   = d.data.name || "";
-  const ja    = d.data.ja   || "";
-  const sciE  = encodeURIComponent(sci);
-  const jaE   = encodeURIComponent(ja);
-  const enUrl = `https://en.wikipedia.org/wiki/${sciE}`;
-  const jaUrl = `https://ja.wikipedia.org/wiki/${jaE}`;
-
+  const sci  = d.data.name || "";
+  const ja   = d.data.ja   || "";
+  const enUrl = `https://en.wikipedia.org/wiki/${encodeURIComponent(sci)}`;
+  const jaUrl = `https://ja.wikipedia.org/wiki/${encodeURIComponent(ja)}`;
   if (langMode === "ja" && ja) {
-    // JA モード + 和名あり: 日本語版が実在するか確認してから開く
-    // Wikipedia API で pageinfo を取得（missing フィールドで判断）
-    const apiUrl = `https://ja.wikipedia.org/w/api.php?action=query`
-                 + `&titles=${jaE}&prop=info&format=json&origin=*`;
-    fetch(apiUrl)
+    const api = `https://ja.wikipedia.org/w/api.php?action=query`
+              + `&titles=${encodeURIComponent(ja)}&prop=info&format=json&origin=*`;
+    fetch(api)
       .then(r => r.json())
       .then(data => {
-        const pages = data.query?.pages || {};
-        const page  = Object.values(pages)[0];
-        // "missing" プロパティがある場合は記事なし → EN にフォールバック
-        if (page && page.missing !== undefined) {
-          window.open(enUrl, "_blank", "noopener");
-        } else {
-          window.open(jaUrl, "_blank", "noopener");
-        }
+        const page = Object.values(data.query?.pages || {})[0];
+        window.open(page?.missing !== undefined ? enUrl : jaUrl, "_blank", "noopener");
       })
-      .catch(() => window.open(jaUrl, "_blank", "noopener")); // fetch失敗時はそのまま開く
+      .catch(() => window.open(jaUrl, "_blank", "noopener"));
   } else {
-    // EN モード or 和名なし: 英語版を直接開く
     window.open(enUrl, "_blank", "noopener");
   }
 }
 
-// ─── ツールチップ（画像対応） ─────────────────────────────────────
+// ─── ツールチップ ────────────────────────────────────────────────
 const tt = document.getElementById("tt");
 let currentTTNode = null;
-let _hideTimer = null;
+let _hideTimer    = null;
 
-// ── ツールチップ幅の制御 ─────────────────────────────────────────
+// ツールチップ幅（localStorage 保存）
 let _ttW = parseInt(localStorage.getItem("taxa_tt_w") || "280");
 function setTTWidth(w) {
   _ttW = w;
   document.documentElement.style.setProperty("--tt-w", w + "px");
   localStorage.setItem("taxa_tt_w", w);
-  // movTT で位置を再計算（幅が変わると右端で反転する閾値が変わるため）
-  if (currentTTNode && tt.style.display !== "none") {
-    const rect = tt.getBoundingClientRect();
-    const r    = mainEl.getBoundingClientRect();
-    const tx   = rect.left - r.left + rect.width / 2;
-    const ty   = rect.top  - r.top  + rect.height / 2;
-    const left = (tx + w + 20 > r.width) ? tx - w - 6 : tx + 6;
-    tt.style.left = left + "px";
-  }
 }
-// 起動時にサイズ復元
 (function() {
   document.documentElement.style.setProperty("--tt-w", _ttW + "px");
   const sl = document.getElementById("tt-size-slider");
@@ -928,92 +850,71 @@ function setTTWidth(w) {
 })();
 
 function schedulHide() {
-  // 300ms 猶予: ノードからツールチップへの移動中に消えないよう確保
-  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 300);
+  _hideTimer = setTimeout(() => { tt.style.display = "none"; }, 450);
 }
 function cancelHide() {
   if (_hideTimer) { clearTimeout(_hideTimer); _hideTimer = null; }
 }
-// ツールチップ上にマウスが来たら非表示タイマーをキャンセル
 tt.addEventListener("mouseenter", cancelHide);
 tt.addEventListener("mouseleave", schedulHide);
 
-// mainEl 上の mousemove: ツールチップ近傍（20px以内）なら hide をキャンセル
-// ノードとツールチップの間の空白を移動中に消えるのを防ぐ
-mainEl.addEventListener("mousemove", (e) => {
+// 近傍ガード（ノードとツールチップ間の移動中に消えにくく）
+mainEl.addEventListener("mousemove", e => {
   if (tt.style.display === "none" || !_hideTimer) return;
   const tr = tt.getBoundingClientRect();
-  const margin = 10;
-  if (e.clientX >= tr.left - margin && e.clientX <= tr.right  + margin &&
-      e.clientY >= tr.top  - margin && e.clientY <= tr.bottom + margin) {
+  const m  = 15;
+  if (e.clientX >= tr.left-m && e.clientX <= tr.right+m &&
+      e.clientY >= tr.top-m  && e.clientY <= tr.bottom+m) {
     cancelHide();
   }
 });
 
-// ─── 長押し（タッチデバイス） ────────────────────────────────────
-let _lpTimer  = null;   // 長押しタイマー
-let _lpFired  = false;  // 長押し発火フラグ
-let _lpNode   = null;   // 対象ノード
-const LP_MS   = 480;    // 長押し判定時間（ms）
+// ─── 長押し（タッチ） ────────────────────────────────────────────
+let _lpTimer = null, _lpFired = false, _lpNode = null;
+const LP_MS  = 480;
 
 function startLongPress(e, d) {
   cancelLongPress();
-  _lpFired = false;
-  _lpNode  = d;
-  // 長押しフィードバック（ノードにクラス付与）
-  d3.select(e.currentTarget).classed('pressing', true);
+  _lpFired = false; _lpNode = d;
+  d3.select(e.currentTarget).classed("pressing", true);
   _lpTimer = setTimeout(() => {
     _lpFired = true;
-    d3.select(e.currentTarget).classed('pressing', false);
-    // タッチ座標からツールチップを表示
-    const touch = e.touches ? e.touches[0] : e;
+    d3.select(e.currentTarget).classed("pressing", false);
     showTTTouch(d);
   }, LP_MS);
 }
-
 function cancelLongPress() {
   if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
-  if (_lpNode) {
-    g.selectAll('.nd').classed('pressing', false);
-  }
+  g.selectAll(".nd").classed("pressing", false);
 }
-
 function endTouch(e, d) {
   cancelLongPress();
-  if (_lpFired) return; // 長押し処理済み → 短タップ扱いにしない
-  // 短タップ: 展開 or Wikipedia
-  const isLeaf = ['species','subspecies','variety','form'].includes(d.data.rank);
-  if (isLeaf && !d.children && !d._children) {
-    openWiki(d);
-  } else {
-    tog(d); update(d);
-  }
+  if (_lpFired) return;
+  const isLeaf = ["species","subspecies","variety","form"].includes(d.data.rank);
+  if (isLeaf && !d.children && !d._children) { openWiki(d); }
+  else { tog(d); update(d); }
 }
-
-// モバイル用ツールチップ表示（位置は画面下部固定のため座標不要）
 function showTTTouch(d) {
-  // showTT の座標計算部分を除いて呼び出す
-  const fakeEvt = { clientX: 0, clientY: 0 }; // movTT は @media で無視される
-  showTT(fakeEvt, d);
-  // モバイルではCSSで bottom 固定にするため left/top 上書きをリセット
-  tt.style.left = '';
-  tt.style.top  = '';
+  showTT({ clientX: 0, clientY: 0 }, d);
+  tt.style.left = "";
+  tt.style.top  = "";
 }
-
-// 画面タップでツールチップを閉じる（ノード以外の領域）
-mainEl.addEventListener('touchstart', (e) => {
-  if (!tt.contains(e.target) && !e.target.closest('.nd')) {
-    tt.style.display = 'none';
+mainEl.addEventListener("touchstart", e => {
+  if (!tt.contains(e.target) && !e.target.closest(".nd")) {
+    tt.style.display = "none";
   }
 }, {passive: true});
+
+// ─── ツールチップ表示 ────────────────────────────────────────────
 function showTT(e, d) {
   const lb = getLabels(d);
   const ch = (d.children ?? d._children ?? []).length;
   const strategyBadge = {
-    'prefix':     ' 🔤 [A補完]',
-    'gbif':       ' 🌐 [B補完]',
-    'incomplete': ' ⚠ [データ不完全]',
-  }[d.data.fetch_strategy] || '';
+    "prefix":     " 🔤 [A補完]",
+    "gbif":       " 🌐 [B補完]",
+    "incomplete": " ⚠ [データ不完全]",
+  }[d.data.fetch_strategy] || "";
+
   document.getElementById("tt-rank").textContent =
     (RJ[d.data.rank] || d.data.rank) + strategyBadge;
   document.getElementById("tt-name").textContent = lb.primary;
@@ -1025,13 +926,9 @@ function showTT(e, d) {
   const creditEl = document.getElementById("tt-credit");
 
   if (d.data.image_url) {
-
-    // Special:FilePath?width= 方式: width値を220に差し替え
-    // Wikimedia API URL の w= パラメータと Special:FilePath の width= 両方に対応
-    // 250px は Wikimedia 標準サイズ（220px は非標準で 429 になる）
     const large = d.data.image_url
-      .replace(/\/\d+px-/, '/250px-')           // CDN thumb URL
-      .replace(/[?&]width=\d+/, '?width=250');  // Special:FilePath URL
+      .replace(/\/\d+px-/, "/250px-")
+      .replace(/[?&]width=\d+/, "?width=250");
     imgEl.src = large;
     imgEl.classList.remove("hidden");
     phEl.classList.add("hidden");
@@ -1043,7 +940,34 @@ function showTT(e, d) {
                      : d.data.rank === "genus" ? "🔬" : "🌿";
     creditEl.textContent = "";
   }
-  // Wikipedia ボタン: 全ランクで表示
+
+  // IUCN バッジ
+  const iucnEl = document.getElementById("tt-iucn");
+  if (iucnEl) {
+    const ic = d.data.iucn || "";
+    const IUCN_META = {
+      EX: ["絶滅 EX",       "#6b7280", "rgba(107,114,128,.15)"],
+      EW: ["野生絶滅 EW",   "#9ca3af", "rgba(156,163,175,.15)"],
+      CR: ["深刻な危機 CR", "#dc2626", "rgba(220,38,38,.15)"],
+      EN: ["危機 EN",       "#ea580c", "rgba(234,88,12,.15)"],
+      VU: ["危急 VU",       "#d97706", "rgba(217,119,6,.15)"],
+      NT: ["準危急 NT",     "#65a30d", "rgba(101,163,13,.15)"],
+      LC: ["低危険 LC",     "#16a34a", "rgba(22,163,74,.15)"],
+      DD: ["情報不足 DD",   "#64748b", "rgba(100,116,139,.15)"],
+    };
+    if (ic && IUCN_META[ic]) {
+      const [label, color, bg] = IUCN_META[ic];
+      iucnEl.textContent      = "IUCN: " + label;
+      iucnEl.style.display    = "block";
+      iucnEl.style.color      = color;
+      iucnEl.style.background = bg;
+      iucnEl.style.border     = "1px solid " + color;
+    } else {
+      iucnEl.style.display = "none";
+    }
+  }
+
+  // Wikipedia ボタン
   const wikiDiv = document.getElementById("tt-wiki");
   const wikiBtn = document.getElementById("tt-wiki-btn");
   wikiBtn.textContent = langMode === "ja" ? "Wikipedia で開く ↗" : "Open in Wikipedia ↗";
@@ -1053,17 +977,17 @@ function showTT(e, d) {
   movTT(e);
 }
 function movTT(e) {
-  const r  = mainEl.getBoundingClientRect();
-  const tx = e.clientX - r.left;
-  const ty = e.clientY - r.top;
-  const w  = _ttW;
+  const r    = mainEl.getBoundingClientRect();
+  const tx   = e.clientX - r.left;
+  const ty   = e.clientY - r.top;
+  const w    = _ttW;
   const left = (tx + w + 20 > r.width) ? tx - w - 6 : tx + 14;
   tt.style.left = left + "px";
-  // 縦: ツールチップが画面下に出ない最大位置
-  const ttH = tt.offsetHeight || (w * 10 / 16 + 140);
+  const ttH = tt.offsetHeight || (w * 10/16 + 140);
   tt.style.top  = Math.min(ty - 10, r.height - ttH - 10) + "px";
 }
 
+// ─── リサイズ / 起動 ─────────────────────────────────────────────
 let rsz;
 window.addEventListener("resize", () => {
   clearTimeout(rsz);
@@ -1074,33 +998,34 @@ window.addEventListener("resize", () => {
 window.addEventListener("load", init);
 </script></body></html>"""
 
+# ─────────────────────────────────────────────────────────────────
+#  生成関数
+# ─────────────────────────────────────────────────────────────────
+
 def make_html(tree: dict, root_qid: str) -> str:
     """standalone モード: JSON を HTML に埋め込む（単体ファイルで動作）。"""
     title = tree.get("name", root_qid)
     if tree.get("ja"):
         title = f"{tree['ja']} ({title})"
-    date       = datetime.now().strftime("%Y-%m-%d")
-    js         = json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
-    data_block = f"const DATA={js};"
+    date  = datetime.now().strftime("%Y-%m-%d")
+    js    = _json.dumps(tree, ensure_ascii=False, separators=(",", ":"))
     return (HTML
             .replace("__TITLE__",      title)
             .replace("__QID__",        root_qid)
             .replace("__DATE__",       date)
-            .replace("__DATA_BLOCK__", data_block))
+            .replace("__DATA_BLOCK__", f"const DATA={js};"))
 
 
 def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
-    """
-    web モード: JSON を外部ファイルから fetch して描画する。
-    GitHub Pages 専用（file:// では CORS のためローカル動作不可）。
-    json_filename: 同じディレクトリに置く JSON ファイル名
+    """web モード: JSON を外部 fetch で読み込む（GitHub Pages 専用）。
+    file:// では CORS のためローカル動作不可。
     """
     title = tree.get("name", root_qid)
     if tree.get("ja"):
         title = f"{tree['ja']} ({title})"
-    date  = datetime.now().strftime("%Y-%m-%d")
-    jf    = json_filename
-    # ストリーミング fetch でプログレスバーを更新してから init()
+    date = datetime.now().strftime("%Y-%m-%d")
+    jf   = json_filename
+    # ストリーミング fetch でプログレスバーを更新しながら JSON を読み込む
     data_block = "\n".join([
         "window.DATA = null;",
         "(async () => {",
@@ -1121,7 +1046,7 @@ def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
         "    }",
         '    if (msg) msg.textContent = "描画中…";',
         '    if (bar) bar.style.width = "100%";',
-        "    const size = chunks.reduce((a, b) => a + b.length, 0);",
+        "    const size = chunks.reduce((a,b) => a+b.length, 0);",
         "    const merged = new Uint8Array(size);",
         "    let off = 0;",
         "    for (const c of chunks) { merged.set(c, off); off += c.length; }",
@@ -1141,12 +1066,7 @@ def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────
-#  ランディングページ生成
-# ─────────────────────────────────────────────────────────────────
-
-
-# ─────────────────────────────────────────────────────────────────
-#  SPA 生成（ランディング + ビューワー統合）
+#  SPA index.html 生成（ランディング + ビューワー統合）
 # ─────────────────────────────────────────────────────────────────
 
 _RANK_JA = {
@@ -1158,56 +1078,355 @@ _RANK_JA = {
     "variety":"変種","form":"品種","unknown":"?",
 }
 
-# SPA テンプレート（__KEY__ を .replace() で差し込む）
-# ※ .format() は JS の { } をプレースホルダとして誤解釈するため使わない
-_SPA_HEAD = '<!DOCTYPE html>\n<html lang="ja" data-theme="dark"><head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>系統図</title>\n<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>\n<style>\n*{box-sizing:border-box;margin:0;padding:0}\n:root{\n  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;\n  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;\n  --brd:#30363d;--hl:#f0b429;--grn:#3fb950;\n}\n[data-theme="light"]{\n  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;\n  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;\n  --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;\n}\nhtml,body{height:100%;background:var(--bg);color:var(--txt);\n  font-family:\'Hiragino Sans\',\'Yu Gothic\',Meiryo,\'Noto Sans JP\',system-ui,sans-serif}\n#view-landing{display:block}\n#view-tree{display:none;position:fixed;inset:0;overflow:hidden}\n#lnd-header{background:var(--bg2);border-bottom:1px solid var(--brd);\n  padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}\n#lnd-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}\n#lnd-main{max-width:960px;margin:0 auto;padding:28px 24px}\n.empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}\n.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}\n.card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;\n  padding:18px;text-decoration:none;color:inherit;cursor:pointer;\n  transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}\n.card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}\n.card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}\n.card-title{font-size:15px;font-weight:600}\n.card-sci{font-size:12px;font-style:italic;color:var(--txt2)}\n.card-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}\n.badge{font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap}\n.b-sp{background:rgba(134,239,172,.12);color:#86efac;border:1px solid rgba(134,239,172,.25)}\n.b-fa{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)}\n.b-nd{background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)}\n.b-dt{background:var(--bg3);color:var(--txt3);border:1px solid var(--brd)}\n[data-theme="light"] .b-sp{background:rgba(21,128,61,.1);color:#15803d;border-color:rgba(21,128,61,.3)}\n[data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}\n[data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}\n.arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}\n#lnd-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);\n  border-top:1px solid var(--brd);margin-top:32px}\n.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);\n  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;\n  transition:border-color .15s,color .15s}\n.tb:hover{border-color:var(--txt2);color:var(--txt)}\n#loading{position:fixed;inset:0;background:var(--bg);\n  display:none;flex-direction:column;align-items:center;justify-content:center;\n  gap:14px;z-index:3000;font-size:13px;color:var(--txt2)}\n#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}\n#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}\n#btn-back{position:fixed;bottom:42px;left:9px;z-index:2500;display:none;\n  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);\n  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;\n  transition:border-color .15s,color .15s}\n#btn-back:hover{border-color:var(--hl);color:var(--hl)}\n__VIEWER_CSS__\n</style></head><body>\n<div id="loading">\n  <div>🌿 <strong id="loading-title"></strong></div>\n  <div id="loading-bar-outer"><div id="loading-bar"></div></div>\n  <div id="loading-msg">データを読み込んでいます…</div>\n</div>\n<button id="btn-back" onclick="goLanding()">← 一覧</button>\n<div id="view-landing">\n  <header id="lnd-header">\n    <h1><span>🌿</span> 系統図 一覧</h1>\n    <div style="display:flex;align-items:center;gap:12px">\n      <span style="font-size:11px;color:var(--txt3)">更新: __DATE__</span>\n      <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">🌙</button>\n    </div>\n  </header>\n  <main id="lnd-main"><div id="lnd-grid"></div></main>\n  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: __DATE__</footer>\n</div>\n<div id="view-tree">\n  <div id="ov"><h2>🌿 系統図を準備中…</h2>\n    <p id="om">データ解析中</p>\n    <div class="pb"><div class="pi" id="pi"></div></div>\n  </div>\n  <div id="hdr">\n    <div id="ttl"><em></em> 系統図</div>\n    <input id="srch" placeholder="検索…"\n      onkeydown="if(event.key===\'Enter\')doSrch(document.getElementById(\'srch\').value)">\n    <button id="srch-btn" onclick="doSrch(document.getElementById(\'srch\').value)">🔍</button>\n    <button id="srch-clr" onclick="clearSrch()" title="検索をクリア">✕</button>\n    <button class="hb" onclick="expandTo(\'family\')">科まで</button>\n    <button class="hb" onclick="expandTo(\'genus\')">属まで</button>\n    <button class="hb" onclick="expandTo(\'species\')">全展開</button>\n    <button class="hb" onclick="collapseAll()">折りたたむ</button>\n    <button class="hb" onclick="fitV(false)">全体表示</button>\n    <div class="ctrl">\n      <button class="tb" id="btn-theme" onclick="toggleTheme()">🌙</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-ja" onclick="setLang(\'ja\')">JA</button>\n      <button class="tb"        id="btn-en" onclick="setLang(\'en\')">EN</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-lr" onclick="setLayout(\'lr\')">LR</button>\n      <button class="tb"        id="btn-tb" onclick="setLayout(\'tb\')">TB</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-icon" onclick="toggleIcons()">🖼</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-iucn-all" onclick="setIucnFilter(\'all\')" title="全て表示">全</button>\n      <button class="tb" id="btn-iucn-no-ex" onclick="setIucnFilter(\'no-extinct\')" title="絶滅種を除外">絶滅除外</button>\n      <button class="tb" id="btn-iucn-only-ex" onclick="setIucnFilter(\'only-extinct\')" title="絶滅種のみ表示">絶滅のみ</button>\n    </div>\n    <div id="stat"></div>\n  </div>\n  <div id="leg">\n    <span>凡例：</span>\n    <div class="li"><div class="ld" style="background:var(--c-order)"></div>目</div>\n    <div class="li"><div class="ld" style="background:var(--c-family)"></div>科</div>\n    <div class="li"><div class="ld" style="background:var(--c-genus)"></div>属</div>\n    <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>\n    <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亚種</div>\n    <span id="leg-hint" style="margin-left:7px">▶クリックで展開 ／ ドラッグ・ホイールでナビ</span>\n  <div id="leg-sizer">\n    <label>⇔ TT</label>\n    <input type="range" id="tt-size-slider"\n      min="180" max="420" step="10" value="280"\n      oninput="setTTWidth(+this.value)">\n  </div>\n</div>\n  <div id="main">\n    <svg id="tree"></svg>\n    <div id="tt">\n      <div id="tt-close" style="display:none;justify-content:flex-end;padding:6px 8px 0;cursor:pointer"\n        onclick="tt.style.display=\'none\'">\n        <span style="font-size:18px;line-height:1;color:var(--txt3)">✕</span>\n      </div>\n      <img id="tt-img" src="" alt="" crossorigin="anonymous"\n           onerror="this.classList.add(\'hidden\');document.getElementById(\'tt-ph\').classList.remove(\'hidden\')">\n      <div id="tt-ph" class="hidden">🌿</div>\n      <div id="tt-body">\n        <div id="tt-rank"></div>\n        <div id="tt-name"></div>\n        <div id="tt-ja"></div>\n        <div id="tt-meta"><span id="tt-cnt"></span><span id="tt-credit"></span></div>\n        <div id="tt-wiki" style="display:none;margin-top:6px">\n          <button id="tt-wiki-btn"\n            style="width:100%;padding:4px 0;font-size:10px;cursor:pointer;\n              background:transparent;border:1px solid var(--brd);\n              border-radius:6px;color:var(--hl);pointer-events:all"\n            onclick="openWiki(currentTTNode)"></button>\n        </div>\n      </div>\n    </div>\n    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: __DATE__</div>\n  </div>\n</div>\n<script>\n__VIEWER_JS__\n</script>\n<script>\nconst TAXA_LIST = __TAXA_JS__;\n\nfunction toggleTheme() {\n  const h = document.documentElement;\n  const t = h.getAttribute(\'data-theme\') === \'dark\' ? \'light\' : \'dark\';\n  h.setAttribute(\'data-theme\', t);\n  [\'btn-theme\',\'btn-theme-lnd\'].forEach(id => {\n    const el = document.getElementById(id);\n    if (el) el.textContent = t === \'dark\' ? \'🌙\' : \'☀️\';\n  });\n  localStorage.setItem(\'taxa_theme\', t);\n}\n(function() {\n  const t = localStorage.getItem(\'taxa_theme\') || \'dark\';\n  document.documentElement.setAttribute(\'data-theme\', t);\n  [\'btn-theme\',\'btn-theme-lnd\'].forEach(id => {\n    const el = document.getElementById(id);\n    if (el) el.textContent = t === \'dark\' ? \'🌙\' : \'☀️\';\n  });\n})();\n\nfunction renderLanding() {\n  const grid = document.getElementById(\'lnd-grid\');\n  if (!TAXA_LIST.length) {\n    grid.innerHTML = \'<div class="empty"><p>📂 まだ系統図がありません。</p>\'\n      + \'<p style="margin-top:8px;font-size:12px">python taxa_tree.py --qid Q25341 を実行してください。</p></div>\';\n    return;\n  }\n  grid.innerHTML = \'<div class="grid">\'\n    + TAXA_LIST.map(t => {\n        const title = t.ja || t.name;\n        const sub   = t.ja ? `<div class="card-sci">${t.name}</div>` : \'\';\n        const badges = [\n          t.sp    ? `<span class="badge b-sp">🐦 ${t.sp.toLocaleString()}種</span>` : \'\',\n          t.fa    ? `<span class="badge b-fa">🏷 ${t.fa.toLocaleString()}科</span>` : \'\',\n          t.nodes ? `<span class="badge b-nd">📦 ${t.nodes.toLocaleString()}件</span>` : \'\',\n          `<span class="badge b-dt">📅 ${t.date}</span>`,\n        ].join(\'\');\n        return `<div class="card" onclick="goViewer(\'${t.qid}\')" role="button" tabindex="0"\n            onkeydown="if(event.key===\'Enter\')goViewer(\'${t.qid}\')">\n          <div class="card-rank">${t.rank_ja} ${t.qid}</div>\n          <div class="card-title">${title}</div>\n          ${sub}\n          <div class="card-meta">${badges}</div>\n          <div class="arrow">系統図を開く →</div>\n        </div>`;\n    }).join(\'\') + \'</div>\';\n}\n\nwindow.DATA = null;\nfunction goLanding()   { location.hash = \'\'; }\nfunction goViewer(qid) { location.hash = qid; }\n\nasync function loadViewer(qid) {\n  const taxa = TAXA_LIST.find(t => t.qid === qid);\n  if (!taxa) { alert(\'QID \' + qid + \' のデータが見つかりません\'); return; }\n  document.getElementById(\'view-landing\').style.display = \'none\';\n  document.getElementById(\'view-tree\').style.display    = \'block\';\n  document.getElementById(\'loading\').style.display      = \'flex\';\n  document.getElementById(\'loading-bar\').style.width    = \'0%\';\n  document.getElementById(\'loading-title\').textContent  = taxa.ja || taxa.name;\n  document.getElementById(\'loading-msg\').textContent    = \'データを読み込んでいます…\';\n  document.title = (taxa.ja || taxa.name) + \' 系統図\';\n  const ttlEl = document.getElementById(\'ttl\');\n  if (ttlEl) ttlEl.innerHTML = `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? \' (\' + taxa.name + \')\' : \'\'} 系統図`;\n  const footEl = document.getElementById(\'foot\');\n  if (footEl) footEl.textContent = `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: __DATE__`;\n  const bar = document.getElementById(\'loading-bar\');\n  const msg = document.getElementById(\'loading-msg\');\n  try {\n    const resp = await fetch(taxa.json);\n    if (!resp.ok) throw new Error(\'HTTP \' + resp.status);\n    const total  = parseInt(resp.headers.get(\'content-length\') || \'0\');\n    const reader = resp.body.getReader();\n    let received = 0;\n    const chunks = [];\n    while (true) {\n      const {done, value} = await reader.read();\n      if (done) break;\n      chunks.push(value); received += value.length;\n      if (total > 0 && bar) bar.style.width = Math.min(received / total * 90, 90) + \'%\';\n    }\n    if (msg) msg.textContent = \'描画中…\';\n    if (bar) bar.style.width = \'100%\';\n    const size   = chunks.reduce((a, b) => a + b.length, 0);\n    const merged = new Uint8Array(size);\n    let off = 0;\n    for (const c of chunks) { merged.set(c, off); off += c.length; }\n    window.DATA = JSON.parse(new TextDecoder().decode(merged));\n    document.getElementById(\'loading\').style.display = \'none\';\n    if (typeof init === \'function\') init();\n  } catch(e) {\n    if (msg) msg.textContent = \'読み込み失敗: \' + e.message;\n    console.error(\'JSON load error:\', e);\n  }\n}\n\nfunction route() {\n  const qid     = location.hash.slice(1);\n  const backBtn = document.getElementById(\'btn-back\');\n  if (qid) {\n    if (backBtn) backBtn.style.display = \'block\';\n    loadViewer(qid);\n  } else {\n    if (backBtn) backBtn.style.display = \'none\';\n    document.getElementById(\'view-landing\').style.display = \'block\';\n    document.getElementById(\'view-tree\').style.display    = \'none\';\n    document.getElementById(\'loading\').style.display      = \'none\';\n    document.title = \'系統図\';\n    renderLanding();\n  }\n}\n\nwindow.addEventListener(\'hashchange\', route);\nwindow.addEventListener(\'load\', () => { renderLanding(); route(); });\n</script>\n</body></html>'
+# SPA の固定 DOM（ランディングページ + ビューワーのシェル）
+# __VIEWER_CSS__ / __VIEWER_JS__ / __TAXA_JS__ / __DATE__ を .replace() で差し込む
+_SPA_HEAD = """<!DOCTYPE html>
+<html lang="ja" data-theme="dark"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>系統図</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
+  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;
+  --brd:#30363d;--hl:#f0b429;--grn:#3fb950;
+}
+[data-theme="light"]{
+  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;
+  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
+  --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;
+}
+html,body{height:100%;background:var(--bg);color:var(--txt);
+  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif}
+#view-landing{display:block}
+#view-tree{display:none;position:fixed;inset:0;overflow:hidden}
+#lnd-header{background:var(--bg2);border-bottom:1px solid var(--brd);
+  padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+#lnd-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+#lnd-main{max-width:960px;margin:0 auto;padding:28px 24px}
+.empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;
+  padding:18px;text-decoration:none;color:inherit;cursor:pointer;
+  transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}
+.card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+.card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}
+.card-title{font-size:15px;font-weight:600}
+.card-sci{font-size:12px;font-style:italic;color:var(--txt2)}
+.card-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
+.badge{font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap}
+.b-sp{background:rgba(134,239,172,.12);color:#86efac;border:1px solid rgba(134,239,172,.25)}
+.b-fa{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)}
+.b-nd{background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)}
+.b-dt{background:var(--bg3);color:var(--txt3);border:1px solid var(--brd)}
+[data-theme="light"] .b-sp{background:rgba(21,128,61,.1);color:#15803d;border-color:rgba(21,128,61,.3)}
+[data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}
+[data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}
+.arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}
+#lnd-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
+  border-top:1px solid var(--brd);margin-top:32px}
+.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+.tb:hover{border-color:var(--txt2);color:var(--txt)}
+#loading{position:fixed;inset:0;background:var(--bg);
+  display:none;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;z-index:3000;font-size:13px;color:var(--txt2)}
+#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
+#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}
+#btn-back{position:fixed;bottom:42px;left:9px;z-index:2500;display:none;
+  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);
+  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
+  transition:border-color .15s,color .15s}
+#btn-back:hover{border-color:var(--hl);color:var(--hl)}
+__VIEWER_CSS__
+</style></head><body>
+<div id="loading">
+  <div>&#127807; <strong id="loading-title"></strong></div>
+  <div id="loading-bar-outer"><div id="loading-bar"></div></div>
+  <div id="loading-msg">データを読み込んでいます…</div>
+</div>
+<button id="btn-back" onclick="goLanding()">&#8592; 一覧</button>
+<div id="view-landing">
+  <header id="lnd-header">
+    <h1><span>&#127807;</span> 系統図 一覧</h1>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span style="font-size:11px;color:var(--txt3)">更新: __DATE__</span>
+      <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">&#127769;</button>
+    </div>
+  </header>
+  <main id="lnd-main"><div id="lnd-grid"></div></main>
+  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: __DATE__</footer>
+</div>
+<div id="view-tree">
+  <div id="ov"><h2>&#127807; 系統図を準備中…</h2>
+    <p id="om">データ解析中</p>
+    <div class="pb"><div class="pi" id="pi"></div></div>
+  </div>
+  <div id="hdr">
+    <div id="ttl"><em></em> 系統図</div>
+    <input id="srch" placeholder="検索…"
+      onkeydown="if(event.key==='Enter')doSrch(document.getElementById('srch').value)">
+    <button id="srch-btn" onclick="doSrch(document.getElementById('srch').value)">&#128269;</button>
+    <button id="srch-clr" onclick="clearSrch()" title="検索をクリア">&#10005;</button>
+    <button class="hb" onclick="expandTo('family')">科まで</button>
+    <button class="hb" onclick="expandTo('genus')">属まで</button>
+    <button class="hb" onclick="expandTo('species')">全展開</button>
+    <button class="hb" onclick="collapseAll()">折りたたむ</button>
+    <button class="hb" onclick="fitV(false)">全体表示</button>
+    <div class="ctrl">
+      <button class="tb" id="btn-theme" onclick="toggleTheme()">&#127769;</button>
+    </div>
+    <div class="ctrl">
+      <button class="tb active" id="btn-ja" onclick="setLang('ja')">JA</button>
+      <button class="tb"        id="btn-en" onclick="setLang('en')">EN</button>
+    </div>
+    <div class="ctrl">
+      <button class="tb active" id="btn-lr" onclick="setLayout('lr')">LR</button>
+      <button class="tb"        id="btn-tb" onclick="setLayout('tb')">TB</button>
+    </div>
+    <div class="ctrl">
+      <button class="tb active" id="btn-icon" onclick="toggleIcons()">&#128444;</button>
+    </div>
+    <div class="ctrl">
+      <button class="tb active" id="btn-iucn-all"
+        onclick="setIucnFilter('all')" title="全て表示">全</button>
+      <button class="tb" id="btn-iucn-no-ex"
+        onclick="setIucnFilter('no-extinct')" title="絶滅種を除外">絶滅除外</button>
+      <button class="tb" id="btn-iucn-only-ex"
+        onclick="setIucnFilter('only-extinct')" title="絶滅種のみ表示">絶滅のみ</button>
+    </div>
+    <div id="stat"></div>
+  </div>
+  <div id="leg">
+    <span>凡例：</span>
+    <div class="li"><div class="ld" style="background:var(--c-order)"></div>目</div>
+    <div class="li"><div class="ld" style="background:var(--c-family)"></div>科</div>
+    <div class="li"><div class="ld" style="background:var(--c-genus)"></div>属</div>
+    <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>
+    <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亜種</div>
+    <span id="leg-hint" style="margin-left:7px">&#9658;クリックで展開 ／ ドラッグ・ホイールでナビ</span>
+    <div id="iucn-leg" style="display:none;gap:6px;flex-wrap:wrap;align-items:center">
+      <span style="color:var(--txt3)">IUCN:</span>
+      <span class="li" style="color:#dc2626">&#9632; CR</span>
+      <span class="li" style="color:#ea580c">&#9632; EN</span>
+      <span class="li" style="color:#d97706">&#9632; VU</span>
+      <span class="li" style="color:#65a30d">&#9632; NT</span>
+      <span class="li" style="color:#16a34a">&#9632; LC</span>
+      <span class="li" style="color:#6b7280">&#9632; EX</span>
+    </div>
+    <button id="iucn-leg-toggle"
+      style="background:transparent;border:1px solid var(--brd);color:var(--txt3);
+        border-radius:8px;padding:1px 6px;font-size:9px;cursor:pointer;
+        white-space:nowrap;margin-left:4px"
+      onclick="(function(){
+        const el=document.getElementById('iucn-leg');
+        const btn=document.getElementById('iucn-leg-toggle');
+        const show=el.style.display==='none'||el.style.display==='';
+        el.style.display=show?'flex':'none';
+        btn.textContent=show?'IUCN &#9650;':'IUCN &#9660;';
+      })()">IUCN &#9660;</button>
+    <div id="leg-sizer">
+      <label>&#8596; TT</label>
+      <input type="range" id="tt-size-slider"
+        min="180" max="420" step="10" value="280"
+        oninput="setTTWidth(+this.value)">
+    </div>
+  </div>
+  <div id="main">
+    <svg id="tree"></svg>
+    <div id="tt">
+      <div id="tt-close"
+        style="display:none;justify-content:flex-end;padding:6px 8px 0;cursor:pointer"
+        onclick="tt.style.display='none'">
+        <span style="font-size:18px;line-height:1;color:var(--txt3)">&#10005;</span>
+      </div>
+      <img id="tt-img" src="" alt="" crossorigin="anonymous"
+           onerror="this.classList.add('hidden');
+             document.getElementById('tt-ph').classList.remove('hidden')">
+      <div id="tt-ph" class="hidden">&#127807;</div>
+      <div id="tt-body">
+        <div id="tt-rank"></div>
+        <div id="tt-name"></div>
+        <div id="tt-ja"></div>
+        <div id="tt-meta"><span id="tt-cnt"></span><span id="tt-credit"></span></div>
+        <div id="tt-iucn"></div>
+        <div id="tt-wiki" style="display:none;margin-top:6px">
+          <button id="tt-wiki-btn"
+            style="width:100%;padding:4px 0;font-size:10px;cursor:pointer;
+              background:transparent;border:1px solid var(--brd);
+              border-radius:6px;color:var(--hl);pointer-events:all"
+            onclick="openWiki(currentTTNode)"></button>
+        </div>
+      </div>
+    </div>
+    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: __DATE__</div>
+  </div>
+</div>
+<script>
+__VIEWER_JS__
+</script>
+<script>
+const TAXA_LIST = __TAXA_JS__;
+
+function toggleTheme() {
+  const h = document.documentElement;
+  const t = h.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  h.setAttribute('data-theme', t);
+  ['btn-theme','btn-theme-lnd'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t === 'dark' ? '🌙' : '☀️';
+  });
+  localStorage.setItem('taxa_theme', t);
+}
+(function() {
+  const t = localStorage.getItem('taxa_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  ['btn-theme','btn-theme-lnd'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t === 'dark' ? '🌙' : '☀️';
+  });
+})();
+
+function renderLanding() {
+  const grid = document.getElementById('lnd-grid');
+  if (!TAXA_LIST.length) {
+    grid.innerHTML = '<div class="empty"><p>&#128194; まだ系統図がありません。</p>'
+      + '<p style="margin-top:8px;font-size:12px">python taxa_tree.py --qid Q25341 を実行してください。</p></div>';
+    return;
+  }
+  grid.innerHTML = '<div class="grid">'
+    + TAXA_LIST.map(t => {
+        const title = t.ja || t.name;
+        const sub   = t.ja ? `<div class="card-sci">${t.name}</div>` : '';
+        const badges = [
+          t.sp    ? `<span class="badge b-sp">&#128054; ${t.sp.toLocaleString()}種</span>` : '',
+          t.fa    ? `<span class="badge b-fa">&#127991; ${t.fa.toLocaleString()}科</span>` : '',
+          t.nodes ? `<span class="badge b-nd">&#128230; ${t.nodes.toLocaleString()}件</span>` : '',
+          `<span class="badge b-dt">&#128197; ${t.date}</span>`,
+        ].join('');
+        return `<div class="card" onclick="goViewer('${t.qid}')" role="button" tabindex="0"
+            onkeydown="if(event.key==='Enter')goViewer('${t.qid}')">
+          <div class="card-rank">${t.rank_ja} ${t.qid}</div>
+          <div class="card-title">${title}</div>
+          ${sub}
+          <div class="card-meta">${badges}</div>
+          <div class="arrow">系統図を開く &#8594;</div>
+        </div>`;
+    }).join('') + '</div>';
+}
+
+window.DATA = null;
+function goLanding()   { location.hash = ''; }
+function goViewer(qid) { location.hash = qid; }
+
+async function loadViewer(qid) {
+  const taxa = TAXA_LIST.find(t => t.qid === qid);
+  if (!taxa) { alert('QID ' + qid + ' のデータが見つかりません'); return; }
+  document.getElementById('view-landing').style.display = 'none';
+  document.getElementById('view-tree').style.display    = 'block';
+  document.getElementById('loading').style.display      = 'flex';
+  document.getElementById('loading-bar').style.width    = '0%';
+  document.getElementById('loading-title').textContent  = taxa.ja || taxa.name;
+  document.getElementById('loading-msg').textContent    = 'データを読み込んでいます…';
+  document.title = (taxa.ja || taxa.name) + ' 系統図';
+  const ttlEl = document.getElementById('ttl');
+  if (ttlEl) ttlEl.innerHTML =
+    `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? ' (' + taxa.name + ')' : ''} 系統図`;
+  const footEl = document.getElementById('foot');
+  if (footEl) footEl.textContent =
+    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: __DATE__`;
+  const bar = document.getElementById('loading-bar');
+  const msg = document.getElementById('loading-msg');
+  try {
+    const resp = await fetch(taxa.json);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const total  = parseInt(resp.headers.get('content-length') || '0');
+    const reader = resp.body.getReader();
+    let received = 0; const chunks = [];
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      chunks.push(value); received += value.length;
+      if (total > 0 && bar)
+        bar.style.width = Math.min(received / total * 90, 90) + '%';
+    }
+    if (msg) msg.textContent = '描画中…';
+    if (bar) bar.style.width = '100%';
+    const size = chunks.reduce((a,b) => a+b.length, 0);
+    const merged = new Uint8Array(size);
+    let off = 0;
+    for (const c of chunks) { merged.set(c, off); off += c.length; }
+    window.DATA = JSON.parse(new TextDecoder().decode(merged));
+    document.getElementById('loading').style.display = 'none';
+    if (typeof init === 'function') init();
+  } catch(e) {
+    if (msg) msg.textContent = '読み込み失敗: ' + e.message;
+    console.error('JSON load error:', e);
+  }
+}
+
+function route() {
+  const qid     = location.hash.slice(1);
+  const backBtn = document.getElementById('btn-back');
+  if (qid) {
+    if (backBtn) backBtn.style.display = 'block';
+    loadViewer(qid);
+  } else {
+    if (backBtn) backBtn.style.display = 'none';
+    document.getElementById('view-landing').style.display = 'block';
+    document.getElementById('view-tree').style.display    = 'none';
+    document.getElementById('loading').style.display      = 'none';
+    document.title = '系統図';
+    renderLanding();
+  }
+}
+
+window.addEventListener('hashchange', route);
+window.addEventListener('load', () => { renderLanding(); route(); });
+</script>
+</body></html>"""
 
 
 def make_index_html(output_dir) -> str:
+    """SPA index.html を生成する。
+    output_dir 内の taxa_cache_Q*.json を走査してカード一覧を構築し、
+    HTML テンプレートの CSS/JS を抽出してビューワーとして埋め込む。
     """
-    SPA 版 index.html を生成する。
-
-    URL:  index.html        → ランディング（カード一覧）
-          index.html#QXXX   → 系統図ビューワー（taxa_cache_QXXX.json を fetch）
-    """
-    import json as _json
-    import re as _re
-    from pathlib import Path as _Path
-
-    out_dir = _Path(output_dir)
-    date    = datetime.now().strftime("%Y-%m-%d")
-
-    # ── カードデータを収集 ────────────────────────────────────────
-    json_files = sorted(
-        out_dir.glob("taxa_cache_Q*.json"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    out_dir   = Path(output_dir)
+    date      = datetime.now().strftime("%Y-%m-%d")
     taxa_list = []
-    for jp in json_files:
-        m = _re.search(r"taxa_cache_(Q\d+)\.json$", jp.name)
-        if not m:
-            continue
-        qid = m.group(1)
-        sci_name = ja_name = rank = ""
-        sp_count = fa_count = node_count = 0
+
+    for jp in sorted(out_dir.glob("taxa_cache_Q*.json"),
+                     key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             with open(jp, encoding="utf-8") as f:
                 tree = _json.load(f)
-            sci_name  = tree.get("name", "")
-            ja_name   = tree.get("ja",   "")
-            rank      = tree.get("rank", "")
-            stack = [tree]
-            while stack:
-                nd = stack.pop()
-                node_count += 1
-                r = nd.get("rank", "")
-                if r == "species":  sp_count += 1
-                elif r == "family": fa_count += 1
-                stack.extend(nd.get("children", []))
         except Exception:
-            pass
+            continue
+        qid       = tree.get("id", jp.stem.replace("taxa_cache_", ""))
+        sci_name  = tree.get("name", "")
+        ja_name   = tree.get("ja",   "")
+        rank      = tree.get("rank", "")
         file_date = datetime.fromtimestamp(jp.stat().st_mtime).strftime("%Y-%m-%d")
+
+        # 統計をワンパスで集計
+        sp_count   = 0
+        fa_count   = 0
+        node_count = 0
+        stack      = [tree]
+        while stack:
+            nd = stack.pop()
+            node_count += 1
+            r = nd.get("rank", "")
+            if r == "species":
+                sp_count += 1
+            elif r == "family":
+                fa_count += 1
+            stack.extend(nd.get("children", []))
+
         taxa_list.append({
             "qid":     qid,
             "name":    sci_name,
@@ -1220,77 +1439,24 @@ def make_index_html(output_dir) -> str:
             "date":    file_date,
             "json":    jp.name,
         })
+
     taxa_js = _json.dumps(taxa_list, ensure_ascii=False)
 
-    # ── テンプレートから CSS と JS を抽出 ─────────────────────────
-    css_m = _re.search(r"<style>(.*?)</style>", HTML, _re.DOTALL)
+    # HTML テンプレートから CSS と JS を抽出
+    css_m      = _re.search(r"<style>(.*?)</style>", HTML, _re.DOTALL)
     viewer_css = css_m.group(1) if css_m else ""
-    # SPA 側で #loading を定義するため viewer_css の重複定義を除去
+    # SPA 側に #loading・#ov を定義するため viewer_css の重複定義を除去
     viewer_css = _re.sub(
-        r"#loading(?:-bar(?:-outer)?|-[a-z-]+)?\{[^}]+\}\n?", "", viewer_css
-    )
-    # IUCN 追加 CSS
-    viewer_css += '\n/* IUCN 保全状況: ノード外枚 */\n.nd.iucn-EX .bg,.nd.iucn-EX .img-ring{stroke:#6b7280!important;stroke-dasharray:4,2}\n.nd.iucn-EW .bg,.nd.iucn-EW .img-ring{stroke:#9ca3af!important;stroke-dasharray:4,2}\n.nd.iucn-CR .bg,.nd.iucn-CR .img-ring{stroke:#dc2626!important;stroke-width:2.5!important}\n.nd.iucn-EN .bg,.nd.iucn-EN .img-ring{stroke:#ea580c!important;stroke-width:2!important}\n.nd.iucn-VU .bg,.nd.iucn-VU .img-ring{stroke:#d97706!important}\n.nd.iucn-NT .bg,.nd.iucn-NT .img-ring{stroke:#65a30d!important}\n/* IUCN バッジ */\n#tt-iucn{display:none;margin-top:6px;padding:3px 8px;border-radius:4px;\n  font-size:10px;font-weight:700;text-align:center;letter-spacing:.05em}\n'
-
-    script_m = _re.search(r"<script(?! src)[^>]*>(.*?)</script>", HTML, _re.DOTALL)
-    viewer_js = script_m.group(1) if script_m else ""
-    viewer_js = viewer_js.replace("__DATA_BLOCK__",
-                                  "// DATA injected by SPA router via window.DATA")
-    viewer_js = viewer_js.replace('window.addEventListener("load", init);', "")
-    # IUCN: ノードクラス動的付与
-    viewer_js = viewer_js.replace(
-        '    .attr("class", d => {\n      const s = d.data.fetch_strategy;\n      if (s === \'prefix\')     return \'nd strategy-prefix\';\n      if (s === \'gbif\')       return \'nd strategy-gbif\';\n      if (s === \'incomplete\') return \'nd strategy-incomplete\';\n      return \'nd\';\n    })',
-        '    .attr("class", d => {\n      const parts = [\'nd\'];\n      const s = d.data.fetch_strategy;\n      if (s === \'prefix\')          parts.push(\'strategy-prefix\');\n      else if (s === \'gbif\')       parts.push(\'strategy-gbif\');\n      else if (s === \'incomplete\') parts.push(\'strategy-incomplete\');\n      if (d.data.iucn) parts.push(\'iucn-\' + d.data.iucn);\n      return parts.join(\' \');\n    })'
-    )
-    # IUCN: showTT にバッジを追加
-    # IUCN フィルター JS を追加
-    viewer_js += "\n// ─── IUCN フィルター ────────────────────────────────────────────────\nlet iucnFilter = 'all';   // 'all' | 'no-extinct' | 'only-extinct'\nconst EXTINCT_CODES = new Set(['EX', 'EW']);\n\nfunction setIucnFilter(mode) {\n  iucnFilter = mode;\n  [['btn-iucn-all','all'],['btn-iucn-no-ex','no-extinct'],['btn-iucn-only-ex','only-extinct']]\n    .forEach(([id, m]) => {\n      const el = document.getElementById(id);\n      if (el) el.classList.toggle('active', m === mode);\n    });\n  applyIucnFilter();\n}\n\nfunction applyIucnFilter() {\n  if (iucnFilter === 'all') {\n    // 検索ハイライトを残しつつフィルター解除\n    if (!document.getElementById('srch').value.trim()) {\n      g.selectAll('.nd').classed('nm', false);\n    } else {\n      doSrch(document.getElementById('srch').value);\n      return;\n    }\n    updStat();\n    return;\n  }\n\n  const show = new Set();\n  walkAll(root, d => {\n    const ic = d.data.iucn || '';\n    const isExtinct = EXTINCT_CODES.has(ic);\n    const match = (iucnFilter === 'no-extinct') ? !isExtinct : isExtinct;\n    if (match) {\n      show.add(d.data.id);\n      let p = d.parent;\n      while (p) { show.add(p.data.id); p = p.parent; }\n    }\n  });\n\n  g.selectAll('.nd').classed('nm', d => !show.has(d.data.id));\n  updStat();\n}\n\n"
-    viewer_js = viewer_js.replace(
-        '  // Wikipedia ボタン: 全ランクで表示\n',
-        '  // IUCN 保全状況バッジ\n  const iucnEl = document.getElementById("tt-iucn");\n  if (iucnEl) {\n    const ic = d.data.iucn || "";\n    const IUCN_META = {\n      EX: ["絶滅 EX","#6b7280","rgba(107,114,128,.15)"],\n      EW: ["野生絶滅 EW","#9ca3af","rgba(156,163,175,.15)"],\n      CR: ["深刻な危機 CR","#dc2626","rgba(220,38,38,.15)"],\n      EN: ["危機 EN","#ea580c","rgba(234,88,12,.15)"],\n      VU: ["危急 VU","#d97706","rgba(217,119,6,.15)"],\n      NT: ["準危急 NT","#65a30d","rgba(101,163,13,.15)"],\n      LC: ["低危険 LC","#16a34a","rgba(22,163,74,.15)"],\n      DD: ["情報不足 DD","#64748b","rgba(100,116,139,.15)"],\n    };\n    if (ic && IUCN_META[ic]) {\n      const [label, color, bg] = IUCN_META[ic];\n      iucnEl.textContent = "IUCN: " + label;\n      iucnEl.style.display    = "block";\n      iucnEl.style.color      = color;\n      iucnEl.style.background = bg;\n      iucnEl.style.border     = "1px solid " + color;\n    } else { iucnEl.style.display = "none"; }\n  }\n  // Wikipedia ボタン: 全ランクで表示\n'
+        r"#(?:loading|ov)(?:-[a-z-]+)?\{[^}]+\}\n?", "", viewer_css
     )
 
-    # ── _SPA_HEAD の DOM に IUCN 凡例と tt-iucn を動的追加 ───────────
-    _spa = _SPA_HEAD
-    # tt-iucn バッジ要素（ツールチップ内）
-    _spa = _spa.replace(
-        '        <div id="tt-meta"><span id="tt-cnt"></span>'
-        '<span id="tt-credit"></span></div>\n'
-        '        <div id="tt-wiki"',
-        '        <div id="tt-meta"><span id="tt-cnt"></span>'
-        '<span id="tt-credit"></span></div>\n'
-        '        <div id="tt-iucn"></div>\n'
-        '        <div id="tt-wiki"',
-        1
-    )
-    # IUCN 凡例トグル（leg-sizer の直前）
-    _iucn_leg = (
-        '  <div id="iucn-leg" style="display:none;gap:6px;'
-        'flex-wrap:wrap;align-items:center">\n'
-        '    <span style="color:var(--txt3)">IUCN:</span>\n'
-        '    <span class="li" style="color:#dc2626">&#9632; CR</span>\n'
-        '    <span class="li" style="color:#ea580c">&#9632; EN</span>\n'
-        '    <span class="li" style="color:#d97706">&#9632; VU</span>\n'
-        '    <span class="li" style="color:#65a30d">&#9632; NT</span>\n'
-        '    <span class="li" style="color:#16a34a">&#9632; LC</span>\n'
-        '    <span class="li" style="color:#6b7280">&#9632; EX</span>\n'
-        '  </div>\n'
-        '  <button id="iucn-leg-toggle"\n'
-        '    style="background:transparent;border:1px solid var(--brd);'
-        'color:var(--txt3);border-radius:8px;padding:1px 6px;font-size:9px;'
-        'cursor:pointer;white-space:nowrap;margin-left:4px"\n'
-        "    onclick=\"(function(){\n"
-        "      const el=document.getElementById('iucn-leg');\n"
-        "      const btn=document.getElementById('iucn-leg-toggle');\n"
-        "      const show=el.style.display==='none';\n"
-        "      el.style.display=show?'flex':'none';\n"
-        "      btn.textContent=show?'IUCN \u25b2':'IUCN \u25bc';\n"
-        '    })()">IUCN \u25bc</button>\n'
-    )
-    _spa = _spa.replace('  <div id="leg-sizer">', _iucn_leg + '  <div id="leg-sizer">', 1)
+    script_m   = _re.search(r"<script(?! src)[^>]*>(.*?)</script>", HTML, _re.DOTALL)
+    viewer_js  = script_m.group(1) if script_m else ""
+    viewer_js  = viewer_js.replace("__DATA_BLOCK__",
+                                   "// DATA injected via window.DATA by SPA router")
+    viewer_js  = viewer_js.replace('window.addEventListener("load", init);', "")
 
-    # ── __KEY__ プレースホルダを実値で置換 ────────────────────────
-    return (_spa
+    return (_SPA_HEAD
             .replace("__DATE__",       date)
             .replace("__VIEWER_CSS__", viewer_css)
             .replace("__TAXA_JS__",    taxa_js)
