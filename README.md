@@ -422,6 +422,115 @@ Wikipedia openWiki():
 
 ---
 
+## AI 開発クレジット
+
+本プロジェクトは **ノーコード開発** の事例として、Claude AI との対話のみによってコードを生成・改良しました。
+
+### 使用 AI
+
+| 項目 | 内容 |
+|---|---|
+| AI サービス | [Claude](https://claude.ai/) by Anthropic |
+| モデル | **Claude Sonnet 4.6**（claude-sonnet-4-6） |
+| 開発期間 | 2026年3月 |
+| 開発手法 | 対話型ノーコード開発（プロンプトエンジニアリング） |
+
+人間が担当したのは **要件定義・動作確認・微調整の指示** のみです。コードの実装・デバッグ・リファクタリングはすべて Claude AI が行いました。
+
+---
+
+## 要件定義（生成プロンプト）
+
+同等のツールを再生成する場合の参考として、開発で使用した主要なプロンプト要件を記載します。
+
+### 基本要件
+
+```
+Wikidata SPARQL API から生物分類データを取得し、
+D3.js でインタラクティブな系統図 HTML を生成する Python スクリプトを作成してください。
+
+要件:
+- 対応範囲: 全生物界（鳥類・哺乳類・植物・昆虫・魚類・菌類など）
+- データソース: Wikidata（無料・認証不要）
+- 出力: 単体で動作する HTML ファイル（外部依存なし）
+- 依存ライブラリ: requests のみ（pip install requests）
+- Python 3.10 以上で動作
+```
+
+### データ取得要件
+
+```
+- Wikidata QID または学名・和名での検索に対応
+- BFS（幅優先探索）で目→科→属→種まで再帰的に取得
+- Phase 1（目〜科）と Phase 2（科以下）に分けて取得し進捗バーを表示
+- キャッシュ JSON を保存し、--render オプションで再取得なしに HTML を再生成できる
+- P171（親タクソン）が未登録の属は P171+（推移的閉包）で補完取得
+- 取得ノードに fetch_strategy フィールドを記録し補完経路を可視化
+- 画像 URL は Wikimedia Commons の MD5 CDN URL を計算で生成（API 呼び出し不要）
+- User-Agent に連絡先メールを埋め込む（--email オプション）
+```
+
+### HTML・UI 要件
+
+```
+D3.js v7 を使用したインタラクティブ系統図:
+- ノードの展開/折りたたみ（クリック）
+- ズーム・パン（ホイール・ドラッグ）
+- LR（左→右）/ TB（上→下）レイアウト切り替え
+- ダーク / ライトテーマ切り替え（localStorage 保存）
+- 日本語 / 英語優先モード切り替え（localStorage 保存）
+- 種ノードに Wikimedia 画像アイコン表示（レイジーロード・レート制限付き）
+- マウスオーバーでツールチップ表示（画像・学名・和名・Wikipedia リンク）
+- ツールチップ幅のスライダー調整（凡例バー右端・localStorage 保存）
+- Wikipedia リンク: JA モードで日本語版の存在を API 確認し、なければ英語版
+- 検索ボックス（🔍ボタン/Enter で実行・折りたたみ状態でも全ノード走査）
+- スマートフォン対応（長押し→ツールチップ、短タップ→展開/Wikipedia）
+- 補完ノードの色分け（橙: P171+補完、赤破線: データ不完全）
+```
+
+### SPA 要件
+
+```
+GitHub Pages で動作する SPA（Single Page Application）として構成:
+
+ファイル構成:
+  result/index.html              SPA（ランディング + ビューワー統合）
+  result/taxa_cache_Q*.json      データ（JSON 分離 web モード）
+
+URL ルーティング（ハッシュベース）:
+  index.html        → カード一覧（ランディングページ）
+  index.html#Q25341 → 系統図ビューワー
+
+機能:
+- ページ遷移なしでカード一覧 ↔ 系統図ビューワーを切り替え
+- ブラウザの戻る/進むボタンに対応（hashchange イベント）
+- JSON をストリーミング fetch してプログレスバーを表示
+- standalone モード（JSON 埋め込み HTML・file:// でローカル動作可）も維持
+
+コマンド:
+  --web         web モード（JSON 分離・GitHub Pages 用）
+  --render-all --web  余分な HTML を削除して index.html を再生成
+```
+
+### 非機能要件
+
+```
+- Wikimedia サーバーへの配慮:
+    画像リクエストは標準サイズ（120px / 250px）のみ使用（429 エラー対策）
+    レートリミット: 4 件/秒（IMG_RATE_PER_SEC）
+    ズーム閾値 0.35 未満では画像ロードしない（IMG_ZOOM_MIN）
+    デバウンス 1500ms（IMG_DEBOUNCE_MS）
+
+- コード品質:
+    3ファイル構成（taxa_tree.py / taxa_fetch.py / taxa_html.py）
+    UI 変更は taxa_html.py のみ、データロジックは taxa_fetch.py のみに閉じる
+    モジュールバージョン定数（FETCH_VERSION / HTML_VERSION）で変更を追跡
+    キャッシュに _meta フィールドでバージョン・取得日時を記録
+```
+
+
+---
+
 ## 参考文献
 
 1. Vrandečić, D., & Krötzsch, M. (2014). Wikidata. *CACM*, 57(10). https://doi.org/10.1145/2629489
