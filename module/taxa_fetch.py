@@ -7,7 +7,7 @@ Wikidata SPARQL から任意の分類群を BFS で取得し、
 ツリー辞書（dict）を返す。出力先・ファイル名は呼び出し元が管理する。
 
 公開 API:
-    init_session(proxy)        セッション初期化（SSL自動検出）
+    init_session(proxy, email) セッション初期化（SSL自動検出・UA設定）
     run_test(proxy)            接続診断
     pick_taxon(query)          学名・和名 → (qid, label)
     fetch_root_info(qid)       ルートノード情報取得
@@ -53,13 +53,13 @@ except Exception:
 
 ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS  = {
-    "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
+    "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
     "Accept":     "application/sparql-results+json",
 }
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "1.4"
+FETCH_VERSION = "1.6"
 
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
@@ -246,7 +246,10 @@ def fmt_node(indent, qid, sci, ja, rank):
 
 _sess = None
 
-def init_session(proxy=None):
+def init_session(proxy=None, email=None):
+    """セッション初期化。email を指定すると User-Agent に埋め込まれる。
+    Wikimedia のポリシー上、連絡先メールを UA に含めることが推奨されている。
+    """
     global _sess
     proxy_dict = None
     if proxy:
@@ -258,10 +261,20 @@ def init_session(proxy=None):
                 proxy_dict = {"http": v, "https": v}
                 break
 
+    # User-Agent: email が指定されていれば埋め込む
+    contact = email or os.environ.get("TAXA_CONTACT_EMAIL", "")
+    ua = (f"TaxaTreeBot/1.0 ({contact})"
+          if contact
+          else "TaxaTreeBot/1.0 (educational; Python/requests)")
+    session_headers = dict(HEADERS)
+    session_headers["User-Agent"] = ua
+    if contact:
+        print(f"  ℹ  User-Agent: {ua}")
+
     verify = True
     for v in [True, False]:
         try:
-            r = requests.get("https://www.wikidata.org/", headers=HEADERS,
+            r = requests.get("https://www.wikidata.org/", headers=session_headers,
                              timeout=12, verify=v, proxies=proxy_dict)
             if r.status_code < 500:
                 verify = v; break
@@ -272,7 +285,7 @@ def init_session(proxy=None):
 
     s = requests.Session()
     s.verify  = verify
-    s.headers.update(HEADERS)
+    s.headers.update(session_headers)
     if proxy_dict:
         s.proxies.update(proxy_dict)
         print(f"  ℹ  プロキシ: {list(proxy_dict.values())[0]}")
@@ -464,6 +477,10 @@ SELECT ?name ?label ?rank WHERE {{
 # ─────────────────────────────────────────────────────────────────
 
 def get_direct_children(parent_qid: str, batch_size: int = 200) -> list:
+    """
+    P171（直接の親）で子ノードを取得する。
+    呼び出し元は必要に応じて get_children_with_supplement を使うこと。
+    """
     records = []
     offset  = 0
     while True:
@@ -486,6 +503,44 @@ LIMIT {batch_size} OFFSET {offset}
         if len(batch) < batch_size: break
         offset += batch_size
         time.sleep(1.0)
+    return records
+
+
+def get_transitive_children(parent_qid: str,
+                             stop_rank: str,
+                             batch_size: int = 500) -> list:
+    """
+    P171+（推移的閉包）で stop_rank までの全子孫を一括取得する。
+
+    P171 が亜属・亜科などを経由していても漏れなく取得できる。
+    直接クエリで0件だった属に対してフォールバックとして使用する。
+
+    注意: P171+ は Wikidata SPARQL で最適化されており高速。
+    """
+    stop_qid = {r: q for q, r in RANK_MAP.items()}.get(stop_rank, "")
+    records   = []
+    offset    = 0
+    rank_filter = (f"  ?child wdt:P105 wd:{stop_qid} .\n" if stop_qid else "")
+    while True:
+        q = f"""
+SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
+  ?child wdt:P171+ wd:{parent_qid} ;
+         wdt:P225 ?name .
+{rank_filter}  OPTIONAL {{ ?child wdt:P105 ?rank }}
+  OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
+  OPTIONAL {{ ?child wdt:P18  ?img }}
+  SERVICE wikibase:label {{
+    bd:serviceParam wikibase:language "ja,en" .
+  }}
+}} ORDER BY ?name
+LIMIT {batch_size} OFFSET {offset}
+"""
+        batch = sparql(q, timeout=60, silent=True)
+        if not batch: break
+        records.extend(batch)
+        if len(batch) < batch_size: break
+        offset += batch_size
+        time.sleep(0.8)
     return records
 
 def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
@@ -641,6 +696,217 @@ def fetch_phase1(root_node: dict, split_rank: str) -> tuple[dict, dict]:
     _sort_children(root_node)
     return root_node, nodes
 
+
+# ─────────────────────────────────────────────────────────────────
+#  子ノード補完: 学名プレフィックス（A）+ GBIF API（B）
+# ─────────────────────────────────────────────────────────────────
+
+# 補完戦略の記録値（ノードの fetch_strategy フィールドに格納）
+STRATEGY_P171       = "p171"         # 通常取得（Wikidata P171）
+STRATEGY_PREFIX     = "prefix"       # A補完: 学名プレフィックス
+STRATEGY_GBIF       = "gbif"         # B補完: GBIF API
+STRATEGY_INCOMPLETE = "incomplete"   # 全手段失敗
+
+# 属レベルより下のランクを補完対象とする
+_SUPPLEMENT_RANKS = {"genus", "subgenus"}
+
+
+def _supplement_by_prefix(
+    parent_qid: str,
+    parent_name: str,
+    parent_rank: str,
+    visited: set,
+) -> list[dict]:
+    """
+    アプローチA: 学名プレフィックスで子を補完する。
+    属名 "Corvus" → STRSTARTS(?name, "Corvus ") で二項名を取得。
+    P171 未登録の種を Wikidata から直接探す。
+    """
+    genus_name = parent_name.strip()
+    if not genus_name:
+        return []
+    prefix = genus_name + " "
+    q = f"""
+SELECT DISTINCT ?child ?name ?rank ?jaName ?img WHERE {{
+  ?child wdt:P225 ?name .
+  FILTER(STRSTARTS(?name, "{prefix}"))
+  OPTIONAL {{ ?child wdt:P105 ?rank }}
+  OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
+  OPTIONAL {{ ?child wdt:P18  ?img }}
+}}
+LIMIT 300
+"""
+    rows = sparql(q, timeout=30, silent=True)
+    nodes = []
+    for row in rows:
+        node = _parse_child_row(row, parent_rank)
+        if not node or node["id"] in visited:
+            continue
+        node["fetch_strategy"] = STRATEGY_PREFIX
+        nodes.append(node)
+    return nodes
+
+
+def _supplement_by_gbif(
+    parent_qid: str,
+    parent_name: str,
+    parent_rank: str,
+    visited: set,
+) -> list[dict]:
+    """
+    アプローチB: GBIF API から子を補完する。
+
+    手順:
+      1. Wikidata P846（GBIF taxon ID）を取得
+      2. GBIF /v1/species/{key}/children を呼ぶ
+      3. 各子の canonicalName で Wikidata QID を逆引き（wdt:P846）
+      4. QID が取れれば通常ノードとして追加、取れなければ GBIF 情報のみで仮ノードを作成
+    """
+    # 1. Wikidata から GBIF ID を取得
+    q_gbif = f"""
+SELECT ?gbifId WHERE {{
+  wd:{parent_qid} wdt:P846 ?gbifId .
+}} LIMIT 1
+"""
+    rows = sparql(q_gbif, timeout=15, silent=True)
+    if not rows:
+        return []
+    gbif_id = rows[0].get("gbifId", {}).get("value", "")
+    if not gbif_id:
+        return []
+
+    # 2. GBIF API で子ノードを取得
+    try:
+        r = get_session().get(
+            f"https://api.gbif.org/v1/species/{gbif_id}/children",
+            params={"limit": 300},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return []
+        gbif_children = r.json().get("results", [])
+    except Exception as e:
+        pprint(f"    ⚠  GBIF API エラー ({e})")
+        return []
+
+    if not gbif_children:
+        return []
+
+    # 3. 各 GBIF 子の canonicalName で Wikidata QID を逆引き
+    #    まとめて1クエリにする（UNION で最大20件ずつ）
+    nodes = []
+    BATCH = 20
+    for i in range(0, len(gbif_children), BATCH):
+        batch = gbif_children[i : i + BATCH]
+        # canonicalName → Wikidata QID を一括検索
+        name_filter = " ".join(
+            f'"{c["canonicalName"]}"' for c in batch if c.get("canonicalName")
+        )
+        if not name_filter:
+            continue
+        q_wikidata = f"""
+SELECT ?child ?name ?rank ?jaName ?img ?gbifId WHERE {{
+  ?child wdt:P225 ?name .
+  FILTER(?name IN ({", ".join(f'"{c["canonicalName"]}"'
+                              for c in batch if c.get("canonicalName"))}))
+  OPTIONAL {{ ?child wdt:P105 ?rank }}
+  OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
+  OPTIONAL {{ ?child wdt:P18  ?img }}
+  OPTIONAL {{ ?child wdt:P846 ?gbifId }}
+}}
+"""
+        wikidata_rows = sparql(q_wikidata, timeout=30, silent=True)
+        # canonicalName → Wikidata ノード の辞書
+        wd_by_name: dict[str, dict] = {}
+        for row in wikidata_rows:
+            node = _parse_child_row(row, parent_rank)
+            if node:
+                node["fetch_strategy"] = STRATEGY_GBIF
+                wd_by_name[node["name"]] = node
+
+        # Wikidata に存在しないものは GBIF 情報のみで仮ノードを作成
+        for gc in batch:
+            cname = gc.get("canonicalName", "")
+            if not cname:
+                continue
+            if cname in wd_by_name:
+                node = wd_by_name[cname]
+            else:
+                # Wikidata QID なし → GBIF キーを ID として仮ノード
+                gbif_key = str(gc.get("key", ""))
+                if not gbif_key:
+                    continue
+                fake_qid  = f"GBIF:{gbif_key}"
+                child_rank = gc.get("rank", "SPECIES").lower()
+                child_rank = RANK_MAP.get(child_rank, child_rank)
+                node = {
+                    "id":             fake_qid,
+                    "name":           cname,
+                    "ja":             "",
+                    "rank":           child_rank,
+                    "wiki_url":       f"https://www.gbif.org/species/{gbif_key}",
+                    "fetch_strategy": STRATEGY_GBIF,
+                    "children":       [],
+                }
+            if node["id"] not in visited:
+                nodes.append(node)
+
+    return nodes
+
+
+def get_children_with_supplement(
+    parent_node: dict,
+    visited: set,
+    stop_rank: str,
+) -> tuple[list[dict], str]:
+    """
+    P171 直接 → P171+ 推移的閉包 の順に子を取得する。
+
+    P171+ は亜属・亜科など中間ノードを経由する場合でも全子孫を取得できる。
+    P171 と P171+ で重複した場合は visited で除外される。
+
+    戻り値: (nodes, strategy)
+    """
+    parent_qid  = parent_node["id"]
+    parent_name = parent_node["name"]
+    parent_rank = parent_node["rank"]
+
+    # ── ① Wikidata P171 直接 ──────────────────────────────────────
+    rows = get_direct_children(parent_qid)
+    nodes_p171 = []
+    if rows:
+        for row in rows:
+            node = _parse_child_row(row, parent_rank)
+            if node and node["id"] not in visited:
+                node.setdefault("fetch_strategy", STRATEGY_P171)
+                nodes_p171.append(node)
+
+    if nodes_p171:
+        return nodes_p171, STRATEGY_P171
+
+    # P171 で子が0件かつ補完対象ランクのみ P171+ を試みる
+    if parent_rank not in _SUPPLEMENT_RANKS:
+        return [], STRATEGY_P171
+
+    # ── ② P171+ 推移的閉包（亜属経由などを捕捉）────────────────────
+    rows_t = get_transitive_children(parent_qid, stop_rank)
+    nodes_t = []
+    if rows_t:
+        for row in rows_t:
+            node = _parse_child_row(row, parent_rank)
+            if node and node["id"] not in visited:
+                node["fetch_strategy"] = STRATEGY_PREFIX  # 推移的補完
+                nodes_t.append(node)
+
+    if nodes_t:
+        pprint(f"    ✅  P171+ 推移補完: {len(nodes_t)}件 [{parent_qid}] {parent_name}")
+        return nodes_t, STRATEGY_PREFIX
+
+    # ── ③ 全手段失敗 ──────────────────────────────────────────────
+    pprint(f"    ⚠  取得失敗 [{parent_qid}] {parent_name} — データ不完全")
+    parent_node["fetch_strategy"] = STRATEGY_INCOMPLETE
+    return [], STRATEGY_INCOMPLETE
+
 # ─────────────────────────────────────────────────────────────────
 #  Phase 2: split_rank ノードごとにサブBFS（進捗バー付き）
 # ─────────────────────────────────────────────────────────────────
@@ -660,26 +926,31 @@ def _bfs_subtree(root_node: dict, nodes_dict: dict, stop_rank: str) -> int:
         parent_idx  = rank_index(parent_rank)
         if parent_idx >= stop_idx: continue
 
-        rows = get_direct_children(parent_qid)
-        for row in rows:
-            node = _parse_child_row(row, parent_rank)
-            if not node or node["id"] in visited: continue
+        child_nodes, strategy = get_children_with_supplement(
+            parent_node, visited, stop_rank
+        )
+        for node in child_nodes:
             visited.add(node["id"])
-
             ci    = rank_index(node["rank"])
             depth = parent_depth + 1
             nodes_dict[node["id"]] = node
             parent_node["children"].append(node)
 
+            strategy_mark = (
+                "  [A]" if node.get("fetch_strategy") == STRATEGY_PREFIX
+                else "  [B]" if node.get("fetch_strategy") == STRATEGY_GBIF
+                else ""
+            )
             pprint(fmt_node("  " * min(depth + 1, 8), node["id"],
-                            node["name"], node["ja"], node["rank"]))
+                            node["name"], node["ja"], node["rank"])
+                   + strategy_mark)
 
             if is_leaf_rank(node["rank"]):
                 count += 1
             elif ci < stop_idx:
                 queue.append((node["id"], depth))
             else:
-                count += 1   # stop_rank に到達
+                count += 1
 
         time.sleep(0.8)
 

@@ -23,6 +23,7 @@ taxa_tree.py  ─  生物分類 汎用系統図ジェネレーター v5
 
   # その他
   python taxa_tree.py --test                # 接続診断
+  python taxa_tree.py --email you@example.com --qid Q25341
 
 【出力フォルダの変更】
   OUTPUT_DIR = "result"  # ← ここを変更するだけ
@@ -191,16 +192,19 @@ def main() -> None:
                     help="出力 HTML ファイル名（省略時は自動生成）")
     ap.add_argument("--proxy",  default=None, metavar="URL",
                     help="プロキシ URL（例: http://proxy.example.com:8080）")
+    ap.add_argument("--email", default="yamamoto.yutaka@jp.panasonic.com", metavar="EMAIL",
+                    help="連絡先メールアドレス（User-Agent に埋め込む。"
+                         "環境変数 TAXA_CONTACT_EMAIL でも設定可）")
     args = ap.parse_args()
 
     print("\n╔═══════════════════════════════════════════════╗")
-    print("║  🌿  生物分類 汎用系統図ジェネレーター  v5   ║")
+    print("║  🌿  生物分類 汎用系統図ジェネレーター  v5    ║")
     print("╚═══════════════════════════════════════════════╝")
     print(f"   fetch: v{FETCH_VERSION}  │  html: v{HTML_VERSION}")
 
     # ── 接続診断 ─────────────────────────────────────────────────
     if args.test:
-        init_session(args.proxy)
+        init_session(args.proxy, getattr(args, "email", None))
         run_test(args.proxy)
         return
 
@@ -222,7 +226,7 @@ def main() -> None:
         print("   HTML のみ再生成: python taxa_tree.py --render [--qid QID]")
         sys.exit(1)
 
-    init_session(args.proxy)
+    init_session(args.proxy, getattr(args, "email", None))
 
     # ── 新規取得モード ────────────────────────────────────────────
     if args.taxon:

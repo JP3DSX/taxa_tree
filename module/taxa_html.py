@@ -16,7 +16,7 @@ from datetime import datetime
 
 # HTML・UI モジュールのバージョン
 # テンプレート・CSS・JS など UI に変更があるたびにインクリメントする
-HTML_VERSION = "1.2"
+HTML_VERSION = "1.5"
 
 HTML = r"""<!DOCTYPE html>
 <html lang="ja" data-theme="dark"><head>
@@ -86,6 +86,10 @@ svg{width:100%;height:100%}
 .nh circle.bg,.nh .img-ring{stroke:var(--hl)!important;stroke-width:2.5!important}
 .nh text{fill:var(--hl)!important}
 .nm{opacity:.1}
+/* 補完取得ノードのバッジ */
+.nd.strategy-prefix .bg,.nd.strategy-prefix .img-ring{stroke:#f59e0b!important}
+.nd.strategy-gbif    .bg,.nd.strategy-gbif    .img-ring{stroke:#3b82f6!important}
+.nd.strategy-incomplete .bg{stroke:#ef4444!important;stroke-dasharray:3,2}
 /* ツールチップ */
 #tt{position:absolute;background:var(--bg2);border:1px solid var(--brd);
   border-radius:10px;padding:0;pointer-events:auto;display:none;
@@ -395,7 +399,7 @@ function init() {
   // モバイルは凡例テキストをタッチ向けに変更
   if (isTouchDev) {
     const hint = document.getElementById('leg-hint');
-    if (hint) hint.textContent = '▶タップで展開 ／ 長押しで詳細 ／ 種タップでWikipedia';
+    if (hint) hint.textContent = '▶タップで展開 ／ 長押しで詳細（Wikipedia）';
   }
 
   prog(20, "ツリー解析中…");
@@ -445,7 +449,14 @@ function update(src) {
 
   // ノード
   const nd = g.selectAll(".nd").data(root.descendants(), d => d.data.id);
-  const ne = nd.enter().append("g").attr("class","nd")
+  const ne = nd.enter().append("g")
+    .attr("class", d => {
+      const s = d.data.fetch_strategy;
+      if (s === 'prefix')     return 'nd strategy-prefix';
+      if (s === 'gbif')       return 'nd strategy-gbif';
+      if (s === 'incomplete') return 'nd strategy-incomplete';
+      return 'nd';
+    })
     .attr("transform", _ => `translate(${sy},${sx})`)
     .on("click", (e, d) => {
       if (isTouchDev) return; // タッチは touchend で処理
@@ -760,14 +771,35 @@ const isTouchDev = window.matchMedia('(pointer: coarse)').matches;
 
 // ─── Wikipedia リンク ────────────────────────────────────────────
 function openWiki(d) {
-  // 言語モードに応じて Wikipedia URL を構築
-  // 学名・和名で直接 Wikipedia を開き、存在しない場合は Wikidata にフォールバック
-  const sci = encodeURIComponent(d.data.name || "");
-  const ja  = encodeURIComponent(d.data.ja   || "");
-  const wikiUrl = langMode === "ja" && d.data.ja
-    ? `https://ja.wikipedia.org/wiki/${ja}`
-    : `https://en.wikipedia.org/wiki/${sci}`;
-  window.open(wikiUrl, "_blank", "noopener");
+  const sci   = d.data.name || "";
+  const ja    = d.data.ja   || "";
+  const sciE  = encodeURIComponent(sci);
+  const jaE   = encodeURIComponent(ja);
+  const enUrl = `https://en.wikipedia.org/wiki/${sciE}`;
+  const jaUrl = `https://ja.wikipedia.org/wiki/${jaE}`;
+
+  if (langMode === "ja" && ja) {
+    // JA モード + 和名あり: 日本語版が実在するか確認してから開く
+    // Wikipedia API で pageinfo を取得（missing フィールドで判断）
+    const apiUrl = `https://ja.wikipedia.org/w/api.php?action=query`
+                 + `&titles=${jaE}&prop=info&format=json&origin=*`;
+    fetch(apiUrl)
+      .then(r => r.json())
+      .then(data => {
+        const pages = data.query?.pages || {};
+        const page  = Object.values(pages)[0];
+        // "missing" プロパティがある場合は記事なし → EN にフォールバック
+        if (page && page.missing !== undefined) {
+          window.open(enUrl, "_blank", "noopener");
+        } else {
+          window.open(jaUrl, "_blank", "noopener");
+        }
+      })
+      .catch(() => window.open(jaUrl, "_blank", "noopener")); // fetch失敗時はそのまま開く
+  } else {
+    // EN モード or 和名なし: 英語版を直接開く
+    window.open(enUrl, "_blank", "noopener");
+  }
 }
 
 // ─── ツールチップ（画像対応） ─────────────────────────────────────
@@ -844,7 +876,13 @@ mainEl.addEventListener('touchstart', (e) => {
 function showTT(e, d) {
   const lb = getLabels(d);
   const ch = (d.children ?? d._children ?? []).length;
-  document.getElementById("tt-rank").textContent = RJ[d.data.rank] || d.data.rank;
+  const strategyBadge = {
+    'prefix':     ' 🔤 [A補完]',
+    'gbif':       ' 🌐 [B補完]',
+    'incomplete': ' ⚠ [データ不完全]',
+  }[d.data.fetch_strategy] || '';
+  document.getElementById("tt-rank").textContent =
+    (RJ[d.data.rank] || d.data.rank) + strategyBadge;
   document.getElementById("tt-name").textContent = lb.primary;
   document.getElementById("tt-ja").textContent   = lb.secondary;
   document.getElementById("tt-cnt").textContent  = ch ? `直下: ${ch}件` : "";
@@ -872,16 +910,11 @@ function showTT(e, d) {
                      : d.data.rank === "genus" ? "🔬" : "🌿";
     creditEl.textContent = "";
   }
-  // Wikipedia ボタン（種・亜種・変種・品種のみ表示）
-  const isLeaf = ["species","subspecies","variety","form"].includes(d.data.rank);
+  // Wikipedia ボタン: 全ランクで表示
   const wikiDiv = document.getElementById("tt-wiki");
   const wikiBtn = document.getElementById("tt-wiki-btn");
-  if (isLeaf) {
-    wikiBtn.textContent = langMode === "ja" ? "Wikipedia で開く ↗" : "Open in Wikipedia ↗";
-    wikiDiv.style.display = "block";
-  } else {
-    wikiDiv.style.display = "none";
-  }
+  wikiBtn.textContent = langMode === "ja" ? "Wikipedia で開く ↗" : "Open in Wikipedia ↗";
+  wikiDiv.style.display = "block";
   currentTTNode = d;
   tt.style.display = "block";
   movTT(e);
