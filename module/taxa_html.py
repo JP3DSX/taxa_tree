@@ -1047,43 +1047,40 @@ def make_web_viewer(tree: dict, root_qid: str, json_filename: str) -> str:
 #  SPA 生成（ランディング + ビューワー統合）
 # ─────────────────────────────────────────────────────────────────
 
-# ランク日本語表記
 _RANK_JA = {
-    "domain": "域", "kingdom": "界", "phylum": "門", "subphylum": "亜門",
-    "superclass": "上綱", "class": "綱", "subclass": "亜綱",
-    "infraclass": "下綱", "superorder": "上目", "order": "目",
-    "suborder": "亜目", "infraorder": "下目", "superfamily": "上科",
-    "family": "科", "subfamily": "亜科", "tribe": "族",
-    "genus": "属", "subgenus": "亜属", "species": "種",
-    "subspecies": "亜種", "variety": "変種", "form": "品種",
-    "unknown": "?",
+    "domain":"域","kingdom":"界","phylum":"門","subphylum":"亜門",
+    "superclass":"上綱","class":"綱","subclass":"亜綱","infraclass":"下綱",
+    "superorder":"上目","order":"目","suborder":"亜目","infraorder":"下目",
+    "superfamily":"上科","family":"科","subfamily":"亜科","tribe":"族",
+    "genus":"属","subgenus":"亜属","species":"種","subspecies":"亜種",
+    "variety":"変種","form":"品種","unknown":"?",
 }
+
+# SPA テンプレート（__KEY__ を .replace() で差し込む）
+# ※ .format() は JS の { } をプレースホルダとして誤解釈するため使わない
+_SPA_HEAD = '<!DOCTYPE html>\n<html lang="ja" data-theme="dark"><head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>系統図</title>\n<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>\n<style>\n*{box-sizing:border-box;margin:0;padding:0}\n:root{\n  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;\n  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;\n  --brd:#30363d;--hl:#f0b429;--grn:#3fb950;\n}\n[data-theme="light"]{\n  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;\n  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;\n  --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;\n}\nhtml,body{height:100%;background:var(--bg);color:var(--txt);\n  font-family:\'Hiragino Sans\',\'Yu Gothic\',Meiryo,\'Noto Sans JP\',system-ui,sans-serif}\n#view-landing{display:block}\n#view-tree{display:none;position:fixed;inset:0;overflow:hidden}\n#lnd-header{background:var(--bg2);border-bottom:1px solid var(--brd);\n  padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}\n#lnd-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}\n#lnd-main{max-width:960px;margin:0 auto;padding:28px 24px}\n.empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}\n.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}\n.card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;\n  padding:18px;text-decoration:none;color:inherit;cursor:pointer;\n  transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}\n.card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}\n.card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}\n.card-title{font-size:15px;font-weight:600}\n.card-sci{font-size:12px;font-style:italic;color:var(--txt2)}\n.card-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}\n.badge{font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap}\n.b-sp{background:rgba(134,239,172,.12);color:#86efac;border:1px solid rgba(134,239,172,.25)}\n.b-fa{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)}\n.b-nd{background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)}\n.b-dt{background:var(--bg3);color:var(--txt3);border:1px solid var(--brd)}\n[data-theme="light"] .b-sp{background:rgba(21,128,61,.1);color:#15803d;border-color:rgba(21,128,61,.3)}\n[data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}\n[data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}\n.arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}\n#lnd-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);\n  border-top:1px solid var(--brd);margin-top:32px}\n.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);\n  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;\n  transition:border-color .15s,color .15s}\n.tb:hover{border-color:var(--txt2);color:var(--txt)}\n#loading{position:fixed;inset:0;background:var(--bg);\n  display:none;flex-direction:column;align-items:center;justify-content:center;\n  gap:14px;z-index:3000;font-size:13px;color:var(--txt2)}\n#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}\n#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}\n#btn-back{position:fixed;top:10px;left:10px;z-index:2500;display:none;\n  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);\n  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;\n  transition:border-color .15s,color .15s}\n#btn-back:hover{border-color:var(--hl);color:var(--hl)}\n__VIEWER_CSS__\n</style></head><body>\n<div id="loading">\n  <div>🌿 <strong id="loading-title"></strong></div>\n  <div id="loading-bar-outer"><div id="loading-bar"></div></div>\n  <div id="loading-msg">データを読み込んでいます…</div>\n</div>\n<button id="btn-back" onclick="goLanding()">← 一覧</button>\n<div id="view-landing">\n  <header id="lnd-header">\n    <h1><span>🌿</span> 系統図 一覧</h1>\n    <div style="display:flex;align-items:center;gap:12px">\n      <span style="font-size:11px;color:var(--txt3)">更新: __DATE__</span>\n      <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">🌙</button>\n    </div>\n  </header>\n  <main id="lnd-main"><div id="lnd-grid"></div></main>\n  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: __DATE__</footer>\n</div>\n<div id="view-tree">\n  <div id="ov"><h2>🌿 系統図を準備中…</h2>\n    <p id="om">データ解析中</p>\n    <div class="pb"><div class="pi" id="pi"></div></div>\n  </div>\n  <div id="hdr">\n    <div id="ttl"><em></em> 系統図</div>\n    <input id="srch" placeholder="検索…"\n      onkeydown="if(event.key===\'Enter\')doSrch(document.getElementById(\'srch\').value)">\n    <button id="srch-btn" onclick="doSrch(document.getElementById(\'srch\').value)">🔍</button>\n    <button id="srch-clr" onclick="clearSrch()" title="検索をクリア">✕</button>\n    <button class="hb" onclick="expandTo(\'family\')">科まで</button>\n    <button class="hb" onclick="expandTo(\'genus\')">属まで</button>\n    <button class="hb" onclick="expandTo(\'species\')">全展開</button>\n    <button class="hb" onclick="collapseAll()">折りたたむ</button>\n    <button class="hb" onclick="fitV(false)">全体表示</button>\n    <div class="ctrl">\n      <button class="tb" id="btn-theme" onclick="toggleTheme()">🌙</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-ja" onclick="setLang(\'ja\')">JA</button>\n      <button class="tb"        id="btn-en" onclick="setLang(\'en\')">EN</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-lr" onclick="setLayout(\'lr\')">LR</button>\n      <button class="tb"        id="btn-tb" onclick="setLayout(\'tb\')">TB</button>\n    </div>\n    <div class="ctrl">\n      <button class="tb active" id="btn-icon" onclick="toggleIcons()">🖼</button>\n    </div>\n    <div id="stat"></div>\n  </div>\n  <div id="leg">\n    <span>凡例：</span>\n    <div class="li"><div class="ld" style="background:var(--c-order)"></div>目</div>\n    <div class="li"><div class="ld" style="background:var(--c-family)"></div>科</div>\n    <div class="li"><div class="ld" style="background:var(--c-genus)"></div>属</div>\n    <div class="li"><div class="ld" style="background:var(--c-species)"></div>種</div>\n    <div class="li"><div class="ld" style="background:var(--c-subspecies)"></div>亚種</div>\n    <span id="leg-hint" style="margin-left:7px">▶クリックで展開 ／ ドラッグ・ホイールでナビ</span>\n  </div>\n  <div id="main">\n    <svg id="tree"></svg>\n    <div id="tt">\n      <div id="tt-close" style="display:none;justify-content:flex-end;padding:6px 8px 0;cursor:pointer"\n        onclick="tt.style.display=\'none\'">\n        <span style="font-size:18px;line-height:1;color:var(--txt3)">✕</span>\n      </div>\n      <img id="tt-img" src="" alt="" crossorigin="anonymous"\n           onerror="this.classList.add(\'hidden\');document.getElementById(\'tt-ph\').classList.remove(\'hidden\')">\n      <div id="tt-ph" class="hidden">🌿</div>\n      <div id="tt-body">\n        <div id="tt-rank"></div>\n        <div id="tt-name"></div>\n        <div id="tt-ja"></div>\n        <div id="tt-meta"><span id="tt-cnt"></span><span id="tt-credit"></span></div>\n        <div id="tt-wiki" style="display:none;margin-top:6px">\n          <button id="tt-wiki-btn"\n            style="width:100%;padding:4px 0;font-size:10px;cursor:pointer;\n              background:transparent;border:1px solid var(--brd);\n              border-radius:6px;color:var(--hl);pointer-events:all"\n            onclick="openWiki(currentTTNode)"></button>\n        </div>\n      </div>\n    </div>\n    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: __DATE__</div>\n  </div>\n</div>\n<script>\n__VIEWER_JS__\n</script>\n<script>\nconst TAXA_LIST = __TAXA_JS__;\n\nfunction toggleTheme() {\n  const h = document.documentElement;\n  const t = h.getAttribute(\'data-theme\') === \'dark\' ? \'light\' : \'dark\';\n  h.setAttribute(\'data-theme\', t);\n  [\'btn-theme\',\'btn-theme-lnd\'].forEach(id => {\n    const el = document.getElementById(id);\n    if (el) el.textContent = t === \'dark\' ? \'🌙\' : \'☀️\';\n  });\n  localStorage.setItem(\'taxa_theme\', t);\n}\n(function() {\n  const t = localStorage.getItem(\'taxa_theme\') || \'dark\';\n  document.documentElement.setAttribute(\'data-theme\', t);\n  [\'btn-theme\',\'btn-theme-lnd\'].forEach(id => {\n    const el = document.getElementById(id);\n    if (el) el.textContent = t === \'dark\' ? \'🌙\' : \'☀️\';\n  });\n})();\n\nfunction renderLanding() {\n  const grid = document.getElementById(\'lnd-grid\');\n  if (!TAXA_LIST.length) {\n    grid.innerHTML = \'<div class="empty"><p>📂 まだ系統図がありません。</p>\'\n      + \'<p style="margin-top:8px;font-size:12px">python taxa_tree.py --qid Q25341 を実行してください。</p></div>\';\n    return;\n  }\n  grid.innerHTML = \'<div class="grid">\'\n    + TAXA_LIST.map(t => {\n        const title = t.ja || t.name;\n        const sub   = t.ja ? `<div class="card-sci">${t.name}</div>` : \'\';\n        const badges = [\n          t.sp    ? `<span class="badge b-sp">🐦 ${t.sp.toLocaleString()}種</span>` : \'\',\n          t.fa    ? `<span class="badge b-fa">🏷 ${t.fa.toLocaleString()}科</span>` : \'\',\n          t.nodes ? `<span class="badge b-nd">📦 ${t.nodes.toLocaleString()}件</span>` : \'\',\n          `<span class="badge b-dt">📅 ${t.date}</span>`,\n        ].join(\'\');\n        return `<div class="card" onclick="goViewer(\'${t.qid}\')" role="button" tabindex="0"\n            onkeydown="if(event.key===\'Enter\')goViewer(\'${t.qid}\')">\n          <div class="card-rank">${t.rank_ja} ${t.qid}</div>\n          <div class="card-title">${title}</div>\n          ${sub}\n          <div class="card-meta">${badges}</div>\n          <div class="arrow">系統図を開く →</div>\n        </div>`;\n    }).join(\'\') + \'</div>\';\n}\n\nwindow.DATA = null;\nfunction goLanding()   { location.hash = \'\'; }\nfunction goViewer(qid) { location.hash = qid; }\n\nasync function loadViewer(qid) {\n  const taxa = TAXA_LIST.find(t => t.qid === qid);\n  if (!taxa) { alert(\'QID \' + qid + \' のデータが見つかりません\'); return; }\n  document.getElementById(\'view-landing\').style.display = \'none\';\n  document.getElementById(\'view-tree\').style.display    = \'block\';\n  document.getElementById(\'loading\').style.display      = \'flex\';\n  document.getElementById(\'loading-bar\').style.width    = \'0%\';\n  document.getElementById(\'loading-title\').textContent  = taxa.ja || taxa.name;\n  document.getElementById(\'loading-msg\').textContent    = \'データを読み込んでいます…\';\n  document.title = (taxa.ja || taxa.name) + \' 系統図\';\n  const ttlEl = document.getElementById(\'ttl\');\n  if (ttlEl) ttlEl.innerHTML = `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? \' (\' + taxa.name + \')\' : \'\'} 系統図`;\n  const footEl = document.getElementById(\'foot\');\n  if (footEl) footEl.textContent = `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: __DATE__`;\n  const bar = document.getElementById(\'loading-bar\');\n  const msg = document.getElementById(\'loading-msg\');\n  try {\n    const resp = await fetch(taxa.json);\n    if (!resp.ok) throw new Error(\'HTTP \' + resp.status);\n    const total  = parseInt(resp.headers.get(\'content-length\') || \'0\');\n    const reader = resp.body.getReader();\n    let received = 0;\n    const chunks = [];\n    while (true) {\n      const {done, value} = await reader.read();\n      if (done) break;\n      chunks.push(value); received += value.length;\n      if (total > 0 && bar) bar.style.width = Math.min(received / total * 90, 90) + \'%\';\n    }\n    if (msg) msg.textContent = \'描画中…\';\n    if (bar) bar.style.width = \'100%\';\n    const size   = chunks.reduce((a, b) => a + b.length, 0);\n    const merged = new Uint8Array(size);\n    let off = 0;\n    for (const c of chunks) { merged.set(c, off); off += c.length; }\n    window.DATA = JSON.parse(new TextDecoder().decode(merged));\n    document.getElementById(\'loading\').style.display = \'none\';\n    if (typeof init === \'function\') init();\n  } catch(e) {\n    if (msg) msg.textContent = \'読み込み失敗: \' + e.message;\n    console.error(\'JSON load error:\', e);\n  }\n}\n\nfunction route() {\n  const qid     = location.hash.slice(1);\n  const backBtn = document.getElementById(\'btn-back\');\n  if (qid) {\n    if (backBtn) backBtn.style.display = \'block\';\n    loadViewer(qid);\n  } else {\n    if (backBtn) backBtn.style.display = \'none\';\n    document.getElementById(\'view-landing\').style.display = \'block\';\n    document.getElementById(\'view-tree\').style.display    = \'none\';\n    document.getElementById(\'loading\').style.display      = \'none\';\n    document.title = \'系統図\';\n    renderLanding();\n  }\n}\n\nwindow.addEventListener(\'hashchange\', route);\nwindow.addEventListener(\'load\', () => { renderLanding(); route(); });\n</script>\n</body></html>'
 
 
 def make_index_html(output_dir) -> str:
     """
     SPA 版 index.html を生成する。
 
-    URL ルーティング:
-      index.html       -> ランディング（カード一覧）
-      index.html#QXXX  -> 系統図ビューワー（taxa_cache_QXXX.json を fetch）
-
-    output_dir: str または Path
+    URL:  index.html        → ランディング（カード一覧）
+          index.html#QXXX   → 系統図ビューワー（taxa_cache_QXXX.json を fetch）
     """
-    from pathlib import Path as _Path
     import json as _json
     import re as _re
+    from pathlib import Path as _Path
 
     out_dir = _Path(output_dir)
     date    = datetime.now().strftime("%Y-%m-%d")
 
-    # ── カードデータをビルド時に収集 ──────────────────────────────
+    # ── カードデータを収集 ────────────────────────────────────────
     json_files = sorted(
         out_dir.glob("taxa_cache_Q*.json"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
-
     taxa_list = []
     for jp in json_files:
         m = _re.search(r"taxa_cache_(Q\d+)\.json$", jp.name)
@@ -1121,273 +1118,25 @@ def make_index_html(output_dir) -> str:
             "date":    file_date,
             "json":    jp.name,
         })
-
     taxa_js = _json.dumps(taxa_list, ensure_ascii=False)
 
-    # ── ビューワー CSS を抽出 ──────────────────────────────────────
-    css_m  = re.search(r"<style>(.*?)</style>", HTML, re.DOTALL)
-    viewer_css_raw = css_m.group(1) if css_m else ""
-    # SPA 側で #loading CSS を定義するため viewer_css の重複定義を除去
-    import re as _re3
-    viewer_css = _re3.sub(r'#loading(?:-bar(?:-outer)?)?\{[^}]+\}\n?',
-                          "", viewer_css_raw)
-
-    # ── ビューワー BODY を抽出し SPA 用に調整 ────────────────────
-    body_m = re.search(r"<body[^>]*>(.*?)</body>", HTML, re.DOTALL)
-    viewer_body = body_m.group(1) if body_m else ""
-    # D3 script タグを削除（SPA 側で1回だけ読み込む）
-    viewer_body = re.sub(
-        r'<script src="https://cdnjs.cloudflare.com.*?"></script>\s*', "",
-        viewer_body
-    )
-    # __DATA_BLOCK__ プレースホルダ → SPA ルーターが注入するためコメントに
-    viewer_body = viewer_body.replace("__DATA_BLOCK__", "/* DATA injected by SPA router */")
-    # タイトル等のプレースホルダ → SPA ルーターが動的に設定
-    # window.addEventListener("load", init) は SPA ルーターが制御するため削除
-    viewer_body = viewer_body.replace('window.addEventListener("load", init);', "")
-    # #loading は SPA ルーターが管理するため viewer_body から除去（二重 id 防止）
-    import re as _re2
-    viewer_body = _re2.sub(
-        r'<div id="loading"[^>]*>.*?</div>\s*', "", viewer_body, flags=_re2.DOTALL)
-    # #ov（スタンドアロン用の初期化オーバーレイ）も SPA では不要なため除去
-    viewer_body = _re2.sub(
-        r'<div id="ov"[^>]*>.*?</div>\s*', "", viewer_body, flags=_re2.DOTALL)
-    viewer_body = viewer_body.replace("__TITLE__", "").replace("__QID__", "").replace("__DATE__", date)
-
-    # ── SPA HTML を組み立て ────────────────────────────────────────
-    return (
-        "<!DOCTYPE html>\n"
-        '<html lang=\"ja\" data-theme=\"dark\"><head>\n'
-        '<meta charset=\"UTF-8\">\n'
-        '<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n'
-        "<title>系統図</title>\n"
-        '<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>\n'
-        "<style>\n"
-        + _spa_css(viewer_css)
-        + "\n</style></head><body>\n"
-        + '<button id="btn-back" style="display:none" onclick="goLanding()">&#8592; &#19968;&#35239;</button>\n'
-        + _spa_landing(date)
-        + _spa_viewer(viewer_body, date)
-        + _spa_scripts(taxa_js, date)
-        + "\n</body></html>"
+    # ── テンプレートから CSS と JS を抽出 ─────────────────────────
+    css_m = _re.search(r"<style>(.*?)</style>", HTML, _re.DOTALL)
+    viewer_css = css_m.group(1) if css_m else ""
+    # SPA 側で #loading を定義するため viewer_css の重複定義を除去
+    viewer_css = _re.sub(
+        r"#loading(?:-bar(?:-outer)?|-[a-z-]+)?\{[^}]+\}\n?", "", viewer_css
     )
 
+    script_m = _re.search(r"<script(?! src)[^>]*>(.*?)</script>", HTML, _re.DOTALL)
+    viewer_js = script_m.group(1) if script_m else ""
+    viewer_js = viewer_js.replace("__DATA_BLOCK__",
+                                  "// DATA injected by SPA router via window.DATA")
+    viewer_js = viewer_js.replace('window.addEventListener("load", init);', "")
 
-def _spa_css(viewer_css: str) -> str:
-    """ランディング + ビューワー共通 CSS を返す。"""
-    return """
-*{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#0d1117;--bg2:#161b22;--bg3:#21262d;
-  --txt:#e6edf3;--txt2:#8b949e;--txt3:#555d6b;
-  --brd:#30363d;--hl:#f0b429;--grn:#3fb950;
-}
-[data-theme="light"]{
-  --bg:#ffffff;--bg2:#f6f8fa;--bg3:#eaeef2;
-  --txt:#1f2328;--txt2:#444c56;--txt3:#768390;
-  --brd:#d0d7de;--hl:#b45309;--grn:#1a7f37;
-}
-html,body{height:100%;background:var(--bg);color:var(--txt);
-  font-family:'Hiragino Sans','Yu Gothic',Meiryo,'Noto Sans JP',system-ui,sans-serif}
-#view-landing{display:block}
-#view-tree{display:none;height:100vh;overflow:hidden}
-#lnd-header{background:var(--bg2);border-bottom:1px solid var(--brd);
-  padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
-#lnd-header h1{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
-#lnd-main{max-width:960px;margin:0 auto;padding:28px 24px}
-.empty{text-align:center;padding:60px 0;color:var(--txt3);font-size:14px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
-.card{background:var(--bg2);border:1px solid var(--brd);border-radius:10px;
-  padding:18px;text-decoration:none;color:inherit;cursor:pointer;
-  transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;gap:6px}
-.card:hover{border-color:var(--hl);box-shadow:0 4px 16px rgba(0,0,0,.3)}
-.card-rank{font-size:10px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase}
-.card-title{font-size:15px;font-weight:600}
-.card-sci{font-size:12px;font-style:italic;color:var(--txt2)}
-.card-meta{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap}
-.badge{font-size:10px;padding:2px 7px;border-radius:8px;white-space:nowrap}
-.b-sp{background:rgba(134,239,172,.12);color:#86efac;border:1px solid rgba(134,239,172,.25)}
-.b-fa{background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)}
-.b-nd{background:rgba(167,139,250,.12);color:#a78bfa;border:1px solid rgba(167,139,250,.25)}
-.b-dt{background:var(--bg3);color:var(--txt3);border:1px solid var(--brd)}
-[data-theme="light"] .b-sp{background:rgba(21,128,61,.1);color:#15803d;border-color:rgba(21,128,61,.3)}
-[data-theme="light"] .b-fa{background:rgba(29,78,216,.1);color:#1d4ed8;border-color:rgba(29,78,216,.3)}
-[data-theme="light"] .b-nd{background:rgba(109,40,217,.1);color:#6d28d9;border-color:rgba(109,40,217,.3)}
-.arrow{margin-top:auto;padding-top:8px;font-size:11px;color:var(--txt3);text-align:right}
-#lnd-footer{text-align:center;padding:24px;font-size:11px;color:var(--txt3);
-  border-top:1px solid var(--brd);margin-top:32px}
-.tb{background:transparent;border:1px solid var(--brd);color:var(--txt2);
-  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
-  transition:border-color .15s,color .15s}
-.tb:hover{border-color:var(--txt2);color:var(--txt)}
-#loading{position:fixed;inset:0;background:var(--bg);display:flex;
-  flex-direction:column;align-items:center;justify-content:center;
-  gap:14px;z-index:2000;font-size:13px;color:var(--txt2)}
-#loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
-#loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;transition:width .3s}
-#btn-back{position:fixed;top:10px;left:10px;z-index:200;
-  background:var(--bg2);border:1px solid var(--brd);color:var(--txt2);
-  border-radius:13px;padding:4px 12px;font-size:11px;cursor:pointer;
-  transition:border-color .15s,color .15s}
-#btn-back:hover{border-color:var(--hl);color:var(--hl)}
-""" + viewer_css
-
-
-def _spa_landing(date: str) -> str:
-    return (
-        '<div id="view-landing">'
-        '<header id="lnd-header">'
-        '<h1><span>&#127807;</span> &#31995;&#32113;&#22259; &#19968;&#35239;</h1>'
-        '<div style="display:flex;align-items:center;gap:12px">'
-        f'<span style="font-size:11px;color:var(--txt3)">&#26356;&#26032;: {date}</span>'
-        '<button class="tb" id="btn-theme" onclick="toggleTheme()">&#127769;</button>'
-        "</div></header>"
-        '<main id="lnd-main"><div id="lnd-grid"></div></main>'
-        f'<footer id="lnd-footer">&#12487;&#12540;&#12479;: Wikidata &nbsp;|&nbsp; &#29983;&#25104;: {date}</footer>'
-        "</div>\n"
-    )
-
-
-def _spa_viewer(viewer_body: str, date: str) -> str:
-    return (
-        '<div id="view-tree">\n'
-        '<div id="loading">'
-        "<div>&#127807; <strong id=\"loading-title\"></strong></div>"
-        '<div id="loading-bar-outer"><div id="loading-bar"></div></div>'
-        '<div id="loading-msg">&#12487;&#12540;&#12479;&#12434;&#35501;&#12415;&#36796;&#12435;&#12391;&#12356;&#12414;&#12377;&#8230;</div>'
-        "</div>\n"
-        + viewer_body
-        + "</div>\n"
-    )
-
-
-def _spa_scripts(taxa_js: str, date: str) -> str:
-    return (
-        # D3 は <head> で読み込み済みのためここでは不要
-        "<script>\n"
-        f"const TAXA_LIST = {taxa_js};\n"
-        + _SPA_JS.replace("__DATE__", date)
-        + "\n</script>"
-    )
-
-
-_SPA_JS = r"""
-function toggleTheme(){
-  const h=document.documentElement;
-  const t=h.getAttribute("data-theme")==="dark"?"light":"dark";
-  h.setAttribute("data-theme",t);
-  const btn=document.getElementById("btn-theme");
-  if(btn) btn.textContent=t==="dark"?"\u{1F319}":"\u2600\uFE0F";
-  localStorage.setItem("taxa_theme",t);
-}
-(function(){
-  const t=localStorage.getItem("taxa_theme")||"dark";
-  document.documentElement.setAttribute("data-theme",t);
-  const btn=document.getElementById("btn-theme");
-  if(btn) btn.textContent=t==="dark"?"\u{1F319}":"\u2600\uFE0F";
-})();
-
-function renderLanding(){
-  const grid=document.getElementById("lnd-grid");
-  if(!TAXA_LIST.length){
-    grid.innerHTML='<div class="empty"><p>\u{1F4C2} \u307E\u3060\u7CFB\u7D71\u56F3\u304C\u3042\u308A\u307E\u305B\u3093\u3002</p>'
-      +'<p style="margin-top:8px;font-size:12px">python taxa_tree.py --qid Q25341 \u3092\u5B9F\u884C\u3057\u3066\u304F\u3060\u3055\u3044\u3002</p></div>';
-    return;
-  }
-  grid.innerHTML='<div class="grid">'
-    +TAXA_LIST.map(t=>{
-      const title=t.ja||t.name;
-      const sub=t.ja?`<div class="card-sci">${t.name}</div>`:"";
-      const badges=[
-        t.sp  ?`<span class="badge b-sp">\u{1F426} ${t.sp.toLocaleString()}\u7A2E</span>`:"",
-        t.fa  ?`<span class="badge b-fa">\u{1F3F7} ${t.fa.toLocaleString()}\u79D1</span>`:"",
-        t.nodes?`<span class="badge b-nd">\u{1F4E6} ${t.nodes.toLocaleString()}\u4EF6</span>`:"",
-        `<span class="badge b-dt">\u{1F4C5} ${t.date}</span>`,
-      ].join("");
-      return `<div class="card" onclick="goViewer('${t.qid}')" role="button" tabindex="0"
-          onkeydown="if(event.key==='Enter')goViewer('${t.qid}')">
-        <div class="card-rank">${t.rank_ja} ${t.qid}</div>
-        <div class="card-title">${title}</div>
-        ${sub}
-        <div class="card-meta">${badges}</div>
-        <div class="arrow">\u7CFB\u7D71\u56F3\u3092\u958B\u304F \u2192</div>
-      </div>`;
-    }).join("")+"</div>";
-}
-
-window.DATA=null;
-function goLanding(){ location.hash=""; }
-function goViewer(qid){ location.hash=qid; }
-
-async function loadViewer(qid){
-  const taxa=TAXA_LIST.find(t=>t.qid===qid);
-  if(!taxa){ alert("QID "+qid+" \u306E\u30C7\u30FC\u30BF\u304C\u898B\u3064\u304B\u308A\u307E\u305B\u3093"); return; }
-  document.getElementById("view-landing").style.display="none";
-  const vt = document.getElementById("view-tree");
-  vt.style.display="block";
-  // ビューワー内部要素（loading以外）は一旦非表示にしてローディング完了後に表示
-  ["hdr","leg","main"].forEach(id => {
-    const el = document.getElementById(id); if (el) el.style.visibility="hidden";
-  });
-  document.getElementById("loading").style.display="flex";
-  document.getElementById("loading-bar").style.width="0%";
-  document.getElementById("loading-title").textContent=taxa.ja||taxa.name;
-  document.getElementById("loading-msg").textContent="\u30C7\u30FC\u30BF\u3092\u8AAD\u307F\u8FBC\u3093\u3067\u3044\u307E\u3059\u2026";
-  document.title=(taxa.ja||taxa.name)+" \u7CFB\u7D71\u56F3";
-  const ttlEl=document.getElementById("ttl");
-  if(ttlEl) ttlEl.innerHTML=`<em>${taxa.ja||taxa.name}</em>${taxa.ja?" ("+taxa.name+")":""} \u7CFB\u7D71\u56F3`;
-  const footEl=document.getElementById("foot");
-  if(footEl) footEl.textContent=`QID: ${taxa.qid} | \u753B\u50CF: Wikimedia Commons | \u751F\u6210: __DATE__`;
-  const bar=document.getElementById("loading-bar");
-  const msg=document.getElementById("loading-msg");
-  try{
-    const resp=await fetch(taxa.json);
-    if(!resp.ok) throw new Error("HTTP "+resp.status);
-    const total=parseInt(resp.headers.get("content-length")||"0");
-    const reader=resp.body.getReader();
-    let received=0; const chunks=[];
-    while(true){
-      const {done,value}=await reader.read();
-      if(done) break;
-      chunks.push(value); received+=value.length;
-      if(total>0&&bar) bar.style.width=Math.min(received/total*90,90)+"%";
-    }
-    if(msg) msg.textContent="\u63CF\u753B\u4E2D\u2026";
-    if(bar) bar.style.width="100%";
-    const size=chunks.reduce((a,b)=>a+b.length,0);
-    const merged=new Uint8Array(size);
-    let off=0;
-    for(const c of chunks){merged.set(c,off);off+=c.length;}
-    window.DATA=JSON.parse(new TextDecoder().decode(merged));
-    document.getElementById("loading").style.display="none";
-    // ビューワー内部要素を表示してから描画
-    ["hdr","leg","main"].forEach(id => {
-      const el = document.getElementById(id); if (el) el.style.visibility="";
-    });
-    if(typeof init==="function") init();
-  }catch(e){
-    if(msg) msg.textContent="\u8AAD\u307F\u8FBC\u307F\u5931\u6557: "+e.message;
-    console.error("JSON load error:",e);
-  }
-}
-
-function route(){
-  const qid=location.hash.slice(1);
-  const backBtn = document.getElementById("btn-back");
-  if(qid){
-    if(backBtn) backBtn.style.display="block";
-    loadViewer(qid);
-  } else{
-    if(backBtn) backBtn.style.display="none";
-    document.getElementById("view-landing").style.display="block";
-    document.getElementById("view-tree").style.display="none";
-    ["hdr","leg","main"].forEach(id => {
-      const el = document.getElementById(id); if (el) el.style.visibility="hidden";
-    });
-    document.title="\u7CFB\u7D71\u56F3";
-    renderLanding();
-  }
-}
-window.addEventListener("hashchange",route);
-window.addEventListener("load",()=>{renderLanding();route();});
-"""
+    # ── __KEY__ プレースホルダを実値で置換 ────────────────────────
+    return (_SPA_HEAD
+            .replace("__DATE__",       date)
+            .replace("__VIEWER_CSS__", viewer_css)
+            .replace("__TAXA_JS__",    taxa_js)
+            .replace("__VIEWER_JS__",  viewer_js))
