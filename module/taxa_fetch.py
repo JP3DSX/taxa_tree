@@ -59,7 +59,19 @@ HEADERS  = {
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "1.7"
+FETCH_VERSION = "1.8"
+
+# IUCN 保全状況 QID → コード
+IUCN_MAP = {
+    "Q219127":  "EX",   # Extinct（絶滅）
+    "Q239509":  "EW",   # Extinct in the Wild（野生絶滅）
+    "Q219159":  "CR",   # Critically Endangered（深刻な危機）
+    "Q11394":   "EN",   # Endangered（危機）
+    "Q278113":  "VU",   # Vulnerable（危急）
+    "Q719675":  "NT",   # Near Threatened（準危急）
+    "Q211005":  "LC",   # Least Concern（低危険）
+    "Q3245245": "DD",   # Data Deficient（情報不足）
+}
 
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
@@ -491,6 +503,7 @@ SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
   OPTIONAL {{ ?child wdt:P105 ?rank }}
   OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
   OPTIONAL {{ ?child wdt:P18  ?img }}
+  OPTIONAL {{ ?child wdt:P141 ?iucn }}
   SERVICE wikibase:label {{
     bd:serviceParam wikibase:language "ja,en" .
   }}
@@ -534,6 +547,7 @@ SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
 {rank_filter}  OPTIONAL {{ ?child wdt:P105 ?rank }}
   OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
   OPTIONAL {{ ?child wdt:P18  ?img }}
+  OPTIONAL {{ ?child wdt:P141 ?iucn }}
   SERVICE wikibase:label {{
     bd:serviceParam wikibase:language "ja,en" .
   }}
@@ -580,6 +594,10 @@ def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
         if filename:
             image_url = resolve_image_url(filename, width=120)
 
+    # IUCN 保全状況
+    iucn_qid    = row.get("iucn", {}).get("value", "").rsplit("/", 1)[-1]
+    iucn_status = IUCN_MAP.get(iucn_qid, "")
+
     # Wikidata エンティティページ URL（QIDから常に生成可能）
     wiki_url = f"https://www.wikidata.org/wiki/{child_qid}"
 
@@ -593,6 +611,8 @@ def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
     }
     if image_url:
         node["image_url"] = image_url
+    if iucn_status:
+        node["iucn"] = iucn_status
     return node
 
 # ─────────────────────────────────────────────────────────────────
