@@ -894,7 +894,7 @@ tt.addEventListener("mouseleave", schedulHide);
 mainEl.addEventListener("mousemove", (e) => {
   if (tt.style.display === "none" || !_hideTimer) return;
   const tr = tt.getBoundingClientRect();
-  const margin = 18;
+  const margin = 15;
   if (e.clientX >= tr.left - margin && e.clientX <= tr.right  + margin &&
       e.clientY >= tr.top  - margin && e.clientY <= tr.bottom + margin) {
     cancelHide();
