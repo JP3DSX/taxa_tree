@@ -53,13 +53,13 @@ except Exception:
 
 ENDPOINT = "https://query.wikidata.org/sparql"
 HEADERS  = {
-    "User-Agent": "TaxaTreeBot/1.0 (educational; Python/requests)",
+    "User-Agent": "TaxaTreeBot/1.0 (yamamoto.yutaka@jp.panasonic.com)",
     "Accept":     "application/sparql-results+json",
 }
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "1.2"
+FETCH_VERSION = "1.3"
 
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
@@ -468,11 +468,12 @@ def get_direct_children(parent_qid: str, batch_size: int = 200) -> list:
     offset  = 0
     while True:
         q = f"""
-SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName WHERE {{
+SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
   ?child wdt:P171 wd:{parent_qid} ;
          wdt:P225 ?name .
   OPTIONAL {{ ?child wdt:P105 ?rank }}
   OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
+  OPTIONAL {{ ?child wdt:P18  ?img }}
   SERVICE wikibase:label {{
     bd:serviceParam wikibase:language "ja,en" .
   }}
