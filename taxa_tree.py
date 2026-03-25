@@ -161,34 +161,29 @@ def _save_html(tree: dict, output_arg: str | None,
     web_mode=False:
         JSON を HTML に埋め込み（デフォルト・単体配布用）。
     """
-    if web_mode:
-        print("\n📄 HTML生成中… [web モード: JSON 分離]")
-        json_fname = f"taxa_cache_{tree['id']}.json"
-        html = make_web_viewer(tree, tree["id"], json_fname)
-    else:
-        print("\n📄 HTML生成中… [standalone モード: JSON 埋め込み]")
-        html = make_html(tree, tree["id"])
-
     if output_arg:
-        out = Path(output_arg)
+            out = Path(output_arg)
     else:
         label = sanitize_filename(
             tree.get("ja") or tree.get("name") or tree["id"]
         )
         out = Path(OUTPUT_DIR) / f"taxa_{label}_{tree['id']}.html"
-
     out.parent.mkdir(parents=True, exist_ok=True)
 
     if web_mode:
-        # web モード: 書き出し前に余分な taxa_*.html を削除
+        print("\n📄 HTML生成中… [web モード: JSON 分離]")
+        # json_fname = f"taxa_cache_{tree['id']}.json"
+        # html = make_web_viewer(tree, tree["id"], json_fname)
         n = _cleanup_html(out.parent)
         if n:
             print(f"  ✅ {n} 件の余分な HTML を削除しました")
-
-    out.write_text(html, encoding="utf-8")
-    mb = out.stat().st_size / 1024 / 1024
-    print(f"\n✅  完了!  →  {out}  ({mb:.1f} MB)  総時間: {_elapsed()}")
-    print(f"🔗  file://{out.resolve()}")
+    else:
+        print("\n📄 HTML生成中… [standalone モード: JSON 埋め込み]")
+        html = make_html(tree, tree["id"])
+        out.write_text(html, encoding="utf-8")
+        mb = out.stat().st_size / 1024 / 1024
+        print(f"\n✅  完了!  →  {out}  ({mb:.1f} MB)  総時間: {_elapsed()}")
+        print(f"🔗  file://{out.resolve()}")
 
     # ── index.html を OUTPUT_DIR に自動更新 ──────────────────────
     index_out = out.parent / "index.html"
@@ -197,7 +192,6 @@ def _save_html(tree: dict, output_arg: str | None,
     print(f"📋  一覧更新  →  {index_out}")
 
     print("\n📬  HTML ファイル1つを共有するだけでOK（インターネット不要）")
-
 
 def _render_all(web_mode: bool) -> None:
     """
