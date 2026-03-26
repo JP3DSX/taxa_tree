@@ -73,6 +73,18 @@ IUCN_MAP = {
     "Q3245245": "DD",   # Data Deficient（情報不足）
 }
 
+# GBIF iucnRedListCategory 文字列 → IUCN コード
+GBIF_IUCN_MAP = {
+    "EXTINCT":             "EX",
+    "EXTINCT_IN_THE_WILD": "EW",
+    "CRITICALLY_ENDANGERED": "CR",
+    "ENDANGERED":          "EN",
+    "VULNERABLE":          "VU",
+    "NEAR_THREATENED":     "NT",
+    "LEAST_CONCERN":       "LC",
+    "DATA_DEFICIENT":      "DD",
+}
+
 # 全生物界に対応した階層順（上位→下位）
 RANK_ORD = [
     "domain",        # 域
@@ -830,7 +842,7 @@ SELECT ?gbifId WHERE {{
         if not name_filter:
             continue
         q_wikidata = f"""
-SELECT ?child ?name ?rank ?jaName ?img ?gbifId WHERE {{
+SELECT ?child ?name ?rank ?jaName ?img ?gbifId ?iucn WHERE {{
   ?child wdt:P225 ?name .
   FILTER(?name IN ({", ".join(f'"{c["canonicalName"]}"'
                               for c in batch if c.get("canonicalName"))}))
@@ -838,6 +850,7 @@ SELECT ?child ?name ?rank ?jaName ?img ?gbifId WHERE {{
   OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
   OPTIONAL {{ ?child wdt:P18  ?img }}
   OPTIONAL {{ ?child wdt:P846 ?gbifId }}
+  OPTIONAL {{ ?child wdt:P141 ?iucn }}
 }}
 """
         wikidata_rows = sparql(q_wikidata, timeout=30, silent=True)
@@ -856,6 +869,12 @@ SELECT ?child ?name ?rank ?jaName ?img ?gbifId WHERE {{
                 continue
             if cname in wd_by_name:
                 node = wd_by_name[cname]
+                # Wikidata P141 がなければ GBIF の iucn で補完
+                if not node.get("iucn"):
+                    gbif_iucn = GBIF_IUCN_MAP.get(
+                        gc.get("iucnRedListCategory", ""), "")
+                    if gbif_iucn:
+                        node["iucn"] = gbif_iucn
             else:
                 # Wikidata QID なし → GBIF キーを ID として仮ノード
                 gbif_key = str(gc.get("key", ""))
@@ -864,6 +883,8 @@ SELECT ?child ?name ?rank ?jaName ?img ?gbifId WHERE {{
                 fake_qid  = f"GBIF:{gbif_key}"
                 child_rank = gc.get("rank", "SPECIES").lower()
                 child_rank = RANK_MAP.get(child_rank, child_rank)
+                gbif_iucn = GBIF_IUCN_MAP.get(
+                    gc.get("iucnRedListCategory", ""), "")
                 node = {
                     "id":             fake_qid,
                     "name":           cname,
@@ -873,6 +894,8 @@ SELECT ?child ?name ?rank ?jaName ?img ?gbifId WHERE {{
                     "fetch_strategy": STRATEGY_GBIF,
                     "children":       [],
                 }
+                if gbif_iucn:
+                    node["iucn"] = gbif_iucn
             if node["id"] not in visited:
                 nodes.append(node)
 
