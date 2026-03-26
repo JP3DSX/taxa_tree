@@ -462,15 +462,15 @@ function setLayout(mode) {
   if (btnRd) btnRd.classList.toggle("active", mode === "rd");
   // radial は size() で全体角度と半径を指定する（nodeSize ではなく）
   if (mode === "rd") {
-    lay.size([2 * Math.PI, 420]).nodeSize(null);
+    lay.size([2 * Math.PI, 420]);
   } else {
-    lay.nodeSize(layoutNodeSize()).size(null);
+    lay.nodeSize(layoutNodeSize());
   }
   update(root);
   setTimeout(() => fitV(false), 260);
 }
 function layoutNodeSize() {
-  if (layoutMode === "rd") return null;  // radial は lay.size() で制御
+  // rd モードは lay.size() で制御するため、この値は LR/TB 専用
   return layoutMode === "lr" ? [18, 200] : [110, 75];
 }
 function toggleIcons() {
@@ -491,7 +491,7 @@ const defs = svg.append("defs");
 defs.append("marker").attr("id","arr").attr("viewBox","0 -3 7 6")
   .attr("refX",7).attr("markerWidth",5).attr("markerHeight",5).attr("orient","auto")
   .append("path").attr("d","M0,-3L7,0L0,3").attr("fill","var(--brd)");
-const lay  = d3.tree().nodeSize(layoutNodeSize());
+const lay  = d3.tree().nodeSize([18, 200]);  // 初期値 LR; init() で再設定
 let root;
 
 const prog = (p, m) => {
@@ -516,8 +516,8 @@ function init() {
   document.getElementById("btn-tb").classList.toggle("active", layoutMode === "tb");
   const _btnRd = document.getElementById("btn-rd");
   if (_btnRd) _btnRd.classList.toggle("active", layoutMode === "rd");
-  if (layoutMode === "rd") lay.size([2 * Math.PI, 420]).nodeSize(null);
-  else lay.nodeSize(layoutNodeSize()).size(null);
+  if (layoutMode === "rd") lay.size([2 * Math.PI, 420]);
+  else lay.nodeSize(layoutNodeSize());
   document.getElementById("btn-icon").classList.toggle("active", showIcons);
   document.getElementById("srch").placeholder = langMode === "ja" ? "検索…" : "Search…";
   lay.nodeSize(layoutNodeSize());
