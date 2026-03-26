@@ -217,12 +217,12 @@ svg{width:100%;height:100%}
   <header id="lnd-header">
     <h1><span>&#127807;</span> 系統図 一覧</h1>
     <div style="display:flex;align-items:center;gap:12px">
-      <span style="font-size:11px;color:var(--txt3)">更新: 2026-03-25</span>
+      <span style="font-size:11px;color:var(--txt3)">更新: 2026-03-26</span>
       <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">&#127769;</button>
     </div>
   </header>
   <main id="lnd-main"><div id="lnd-grid"></div></main>
-  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-03-25</footer>
+  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-03-26</footer>
 </div>
 <div id="view-tree">
   <div id="ov"><h2>&#127807; 系統図を準備中…</h2>
@@ -326,7 +326,7 @@ svg{width:100%;height:100%}
         </div>
       </div>
     </div>
-    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-03-25</div>
+    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-03-26</div>
   </div>
 </div>
 <script>
@@ -1033,7 +1033,7 @@ window.addEventListener("resize", () => {
 
 </script>
 <script>
-const TAXA_LIST = [{"qid": "Q7380", "name": "Primates", "ja": "サル目", "rank": "order", "rank_ja": "目", "sp": 72, "fa": 27, "nodes": 220, "date": "2026-03-25", "json": "taxa_cache_Q7380.json"}, {"qid": "Q25341", "name": "Passeriformes", "ja": "スズメ目", "rank": "order", "rank_ja": "目", "sp": 6138, "fa": 90, "nodes": 7223, "date": "2026-03-25", "json": "taxa_cache_Q25341.json"}, {"qid": "Q193389", "name": "Clupeiformes", "ja": "ニシン目", "rank": "order", "rank_ja": "目", "sp": 1272, "fa": 11, "nodes": 1444, "date": "2026-03-24", "json": "taxa_cache_Q193389.json"}];
+const TAXA_LIST = [{"qid": "Q7380", "name": "Primates", "ja": "サル目", "rank": "order", "rank_ja": "目", "sp": 72, "fa": 27, "nodes": 220, "date": "2026-03-26", "json": "taxa_cache_Q7380.json"}];
 
 function toggleTheme() {
   const h = document.documentElement;
@@ -1101,7 +1101,7 @@ async function loadViewer(qid) {
     `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? ' (' + taxa.name + ')' : ''} 系統図`;
   const footEl = document.getElementById('foot');
   if (footEl) footEl.textContent =
-    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-03-25`;
+    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-03-26`;
   const bar = document.getElementById('loading-bar');
   const msg = document.getElementById('loading-msg');
   try {

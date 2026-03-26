@@ -497,7 +497,7 @@ def get_direct_children(parent_qid: str, batch_size: int = 200) -> list:
     offset  = 0
     while True:
         q = f"""
-SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
+SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img ?iucn WHERE {{
   ?child wdt:P171 wd:{parent_qid} ;
          wdt:P225 ?name .
   OPTIONAL {{ ?child wdt:P105 ?rank }}
@@ -541,7 +541,7 @@ def get_transitive_children(parent_qid: str,
         rank_filter = ""
     while True:
         q = f"""
-SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img WHERE {{
+SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img ?iucn WHERE {{
   ?child wdt:P171+ wd:{parent_qid} ;
          wdt:P225 ?name .
 {rank_filter}  OPTIONAL {{ ?child wdt:P105 ?rank }}

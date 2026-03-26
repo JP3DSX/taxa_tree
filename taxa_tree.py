@@ -55,7 +55,7 @@ from module.taxa_fetch import (
     run_test,
     sanitize_filename,
 )
-from module.taxa_html import HTML_VERSION, make_html, make_index_html, make_web_viewer
+from module.taxa_html import HTML_VERSION, make_html, make_index_html
 
 # ─────────────────────────────────────────────────────────────────
 #  設定
@@ -156,42 +156,44 @@ def _save_html(tree: dict, output_arg: str | None,
     HTML を生成してファイルに書き出す。
 
     web_mode=True:
-        JSON を外部ファイルに分離（GitHub Pages 用）。
-        生成後に OUTPUT_DIR 内の余分な taxa_*.html を削除する。
+        個別 HTML は生成しない（SPA の index.html + JSON で完結するため）。
+        余分な taxa_*.html を削除して index.html を更新する。
     web_mode=False:
-        JSON を HTML に埋め込み（デフォルト・単体配布用）。
+        JSON を HTML に埋め込んだ standalone ファイルを生成する。
     """
-    if output_arg:
-            out = Path(output_arg)
-    else:
-        label = sanitize_filename(
-            tree.get("ja") or tree.get("name") or tree["id"]
-        )
-        out = Path(OUTPUT_DIR) / f"taxa_{label}_{tree['id']}.html"
-    out.parent.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(OUTPUT_DIR)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if web_mode:
-        print("\n📄 HTML生成中… [web モード: JSON 分離]")
-        # json_fname = f"taxa_cache_{tree['id']}.json"
-        # html = make_web_viewer(tree, tree["id"], json_fname)
-        n = _cleanup_html(out.parent)
+        print("\n🌐 web モード: 個別 HTML は生成しません（SPA + JSON で完結）")
+        n = _cleanup_html(out_dir)
         if n:
             print(f"  ✅ {n} 件の余分な HTML を削除しました")
     else:
         print("\n📄 HTML生成中… [standalone モード: JSON 埋め込み]")
         html = make_html(tree, tree["id"])
+        if output_arg:
+            out = Path(output_arg)
+        else:
+            label = sanitize_filename(
+                tree.get("ja") or tree.get("name") or tree["id"]
+            )
+            out = out_dir / f"taxa_{label}_{tree['id']}.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(html, encoding="utf-8")
         mb = out.stat().st_size / 1024 / 1024
         print(f"\n✅  完了!  →  {out}  ({mb:.1f} MB)  総時間: {_elapsed()}")
         print(f"🔗  file://{out.resolve()}")
 
     # ── index.html を OUTPUT_DIR に自動更新 ──────────────────────
-    index_out = out.parent / "index.html"
-    index_html = make_index_html(out.parent)
+    index_out  = out_dir / "index.html"
+    index_html = make_index_html(out_dir)
     index_out.write_text(index_html, encoding="utf-8")
     print(f"📋  一覧更新  →  {index_out}")
 
-    print("\n📬  HTML ファイル1つを共有するだけでOK（インターネット不要）")
+    if not web_mode:
+        print("\n📬  HTML ファイル1つを共有するだけでOK（インターネット不要）")
+
 
 def _render_all(web_mode: bool) -> None:
     """
