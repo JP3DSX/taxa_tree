@@ -59,7 +59,7 @@ HEADERS  = {
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "2.0"
+FETCH_VERSION = "2.1"
 
 # IUCN 保全状況 QID → コード
 IUCN_MAP = {
@@ -880,13 +880,15 @@ def fetch_phase1(root_node: dict, split_rank: str) -> tuple[dict, dict]:
     visited  = {root_qid}
 
     while queue:
-        # キューから stop_idx 未満のノードを最大 BATCH_PARENT_SIZE 件取り出す
+        # キューから stop_idx 未満 or unknown のノードを最大 BATCH_PARENT_SIZE 件取り出す
+        # unknown rank は Wikidata P105 未登録の中間分類群の可能性があるため必ず探索する
         batch_qids = []
         while queue and len(batch_qids) < BATCH_PARENT_SIZE:
             qid = queue.popleft()
-            if rank_index(nodes[qid]["rank"]) < stop_idx:
+            ri = rank_index(nodes[qid]["rank"])
+            if ri < stop_idx or nodes[qid]["rank"] == "unknown":
                 batch_qids.append(qid)
-            # stop_idx 以上のノードはスキップ（子を取る必要がない）
+            # stop_idx 以上かつ rank 確定済みはスキップ
 
         if not batch_qids:
             continue
@@ -916,7 +918,7 @@ def fetch_phase1(root_node: dict, split_rank: str) -> tuple[dict, dict]:
                 ci = rank_index(node["rank"])
                 pprint(fmt_node("  " * min(ci + 2, 8), node["id"],
                                 node["name"], node["ja"], node["rank"]))
-                if ci < stop_idx:
+                if ci < stop_idx or node["rank"] == "unknown":
                     queue.append(node["id"])
 
     _stats["phase1_elapsed"] = time.time() - _stats["phase1_start"]
