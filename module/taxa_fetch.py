@@ -59,7 +59,7 @@ HEADERS  = {
 
 # フェッチモジュールのバージョン
 # SPARQL クエリ・BFS・画像URL方式など取得機能に変更があるたびにインクリメントする
-FETCH_VERSION = "1.8"
+FETCH_VERSION = "2.0"
 
 # IUCN 保全状況 QID → コード
 IUCN_MAP = {
@@ -212,6 +212,40 @@ _bar = {"done": 0, "total": 0, "done_p": 0, "total_p": 0,
         "done_sp": 0, "total_sp": 0,
         "cur": "", "active": False, "unit": "種"}
 
+# ─── 取得統計（効果測定用） ────────────────────────────────────
+_stats: dict = {
+    "queries":         0,   # SPARQL クエリ発行回数
+    "batch_queries":   0,   # バッチクエリ発行回数
+    "oneshot_queries": 0,   # P171+ ワンショットクエリ発行回数
+    "oneshot_hits":    0,   # ワンショットで取得できた科の数
+    "oneshot_miss":    0,   # フォールバックした科の数
+    "single_queries":  0,   # 単体クエリ発行回数（補完など）
+    "rows_fetched":   0,    # 取得行数合計
+    "sleep_total":    0.0,  # sleep 合計秒数
+    "phase1_start":   0.0,
+    "phase2_start":   0.0,
+    "phase1_elapsed": 0.0,
+    "phase2_elapsed": 0.0,
+}
+
+def print_stats() -> None:
+    """取得統計をコンソールに出力する（効果測定用）。"""
+    s = _stats
+    total = s["phase1_elapsed"] + s["phase2_elapsed"]
+    pprint(f"\n  ┌─ 取得統計 ───────────────────────────────────")
+    pprint(f"  │  総クエリ数    : {s['queries']:>6} 回")
+    pprint(f"  │    バッチ      : {s['batch_queries']:>6} 回")
+    pprint(f"  │    ワンショット: {s['oneshot_queries']:>6} 回  (成功:{s['oneshot_hits']} / FB:{s['oneshot_miss']})")
+    pprint(f"  │    単体（補完）: {s['single_queries']:>6} 回")
+    pprint(f"  │  取得行数合計  : {s['rows_fetched']:>6,} 件")
+    pprint(f"  │  sleep 合計    : {s['sleep_total']:>6.1f} 秒")
+    pprint(f"  │  Phase1 時間   : {s['phase1_elapsed']:>6.1f} 秒")
+    pprint(f"  │  Phase2 時間   : {s['phase2_elapsed']:>6.1f} 秒")
+    pprint(f"  │  合計時間      : {total:>6.1f} 秒")
+    pprint(f"  └────────────────────────────────────────────────")
+
+
+
 def _bar_line():
     b = _bar
     cols   = shutil.get_terminal_size((100, 24)).columns
@@ -339,6 +373,8 @@ def sparql(query, label="", retries=4, timeout=45, silent=False):
                 if not silent: pprint(f"    ⚠  HTTP {r.status_code}: {r.text[:100]}")
                 time.sleep(8 * (attempt + 1)); continue
             rows = r.json().get("results", {}).get("bindings", [])
+            _stats["queries"]     += 1
+            _stats["rows_fetched"] += len(rows)
             if label and not silent: pprint(f"    ✓  {label}: {len(rows)}件")
             return rows
         except requests.exceptions.Timeout:
@@ -527,8 +563,48 @@ LIMIT {batch_size} OFFSET {offset}
         records.extend(batch)
         if len(batch) < batch_size: break
         offset += batch_size
-        time.sleep(1.0)
+        _stats["sleep_total"] += 1.0; time.sleep(1.0)
     return records
+
+
+
+# バッチ取得のデフォルトサイズ（Wikidata の安定動作実績から 20 を推奨）
+BATCH_PARENT_SIZE = 20
+
+def get_batch_children(parent_qids: list[str]) -> dict[str, list]:
+    """
+    VALUES ?parent {{ wd:Q1 wd:Q2 ... }} で複数の親を1クエリで一括取得する。
+
+    戻り値: {parent_qid: [row, ...]} の辞書
+    """
+    if not parent_qids:
+        return {}
+
+    values = " ".join(f"wd:{q}" for q in parent_qids)
+    q = f"""
+SELECT DISTINCT ?parent ?child ?childLabel ?name ?rank ?jaName ?img ?iucn WHERE {{
+  VALUES ?parent {{ {values} }}
+  ?child wdt:P171 ?parent ;
+         wdt:P225 ?name .
+  OPTIONAL {{ ?child wdt:P105  ?rank }}
+  OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
+  OPTIONAL {{ ?child wdt:P18   ?img }}
+  OPTIONAL {{ ?child wdt:P141  ?iucn }}
+  SERVICE wikibase:label {{
+    bd:serviceParam wikibase:language "ja,en" .
+  }}
+}} ORDER BY ?parent ?name
+"""
+    rows = sparql(q, timeout=60, silent=True)
+    _stats["batch_queries"] += 1
+
+    # 親ごとにグループ化
+    result: dict[str, list] = {q: [] for q in parent_qids}
+    for row in rows:
+        p = row.get("parent", {}).get("value", "").rsplit("/", 1)[-1]
+        if p in result:
+            result[p].append(row)
+    return result
 
 
 def get_transitive_children(parent_qid: str,
@@ -573,6 +649,109 @@ LIMIT {batch_size} OFFSET {offset}
         offset += batch_size
         time.sleep(0.8)
     return records
+
+# ─────────────────────────────────────────────────────────────────
+#  P171+ ワンショット取得（案A）
+# ─────────────────────────────────────────────────────────────────
+
+# ワンショット1回あたりの取得上限（Wikidata の行数制限に合わせて調整）
+ONESHOT_LIMIT  = 5000
+# ワンショットのタイムアウト秒数（大きい分類群では時間がかかる）
+ONESHOT_TIMEOUT = 55
+
+def fetch_subtree_oneshot(
+    root_node: dict,
+    nodes_dict: dict,
+    stop_rank: str,
+) -> bool:
+    """
+    P171+（推移的閉包）で root_node の全子孫を一括取得してツリーに追加する。
+
+    設計上のポイント:
+    - SPARQL クエリは最小限（P171+ + P225 + OPTIONAL フィールドのみ）
+    - rank_filter は使わない → Wikidata の最適化を妨げるため
+    - 親子関係は P225 学名の階層（属名プレフィックス）で推定する
+    - stop_rank を超えるノードは Python 側でフィルタ
+
+    戻り値: True=成功（1件以上取得）/ False=失敗（フォールバック要）
+    """
+    root_qid = root_node["id"]
+    stop_idx = rank_index(stop_rank)
+
+    records: list = []
+    offset = 0
+    while True:
+        q = f"""
+SELECT DISTINCT ?child ?childLabel ?name ?rank ?jaName ?img ?iucn WHERE {{
+  ?child wdt:P171+ wd:{root_qid} ;
+         wdt:P225  ?name .
+  OPTIONAL {{ ?child wdt:P105  ?rank }}
+  OPTIONAL {{ ?child wdt:P1843 ?jaName . FILTER(LANG(?jaName) = "ja") }}
+  OPTIONAL {{ ?child wdt:P18   ?img }}
+  OPTIONAL {{ ?child wdt:P141  ?iucn }}
+  SERVICE wikibase:label {{
+    bd:serviceParam wikibase:language "ja,en" .
+  }}
+}} ORDER BY ?name
+LIMIT {ONESHOT_LIMIT} OFFSET {offset}
+"""
+        rows = sparql(q, timeout=ONESHOT_TIMEOUT, silent=True)
+        _stats["oneshot_queries"] += 1
+        if not rows:
+            break
+        records.extend(rows)
+        if len(rows) < ONESHOT_LIMIT:
+            break
+        offset += ONESHOT_LIMIT
+        _stats["sleep_total"] += 0.8
+        time.sleep(0.8)
+
+    if not records:
+        return False
+
+    # ── 新規ノードを nodes_dict に登録 ──────────────────────────
+    # stop_rank を超えるノードはスキップ
+    new_nodes: dict[str, dict] = {}
+    for row in records:
+        node = _parse_child_row(row, "")
+        if not node:
+            continue
+        if rank_index(node["rank"]) > stop_idx:
+            continue
+        qid = node["id"]
+        if qid not in nodes_dict and qid not in new_nodes:
+            new_nodes[qid] = node
+
+    if not new_nodes:
+        return False
+
+    nodes_dict.update(new_nodes)
+
+    # ── 親子関係を復元（学名プレフィックスで推定）──────────────
+    # 例: "Corvus corax" の親は nodes_dict の中で "Corvus" という名の属ノード
+    # まず全ノードを sci名 → node の辞書に変換
+    name_to_node: dict[str, dict] = {nd["name"]: nd for nd in nodes_dict.values()
+                                      if nd.get("name")}
+
+    for qid, node in new_nodes.items():
+        sci   = node.get("name", "")
+        parts = sci.split()
+        # 学名2語以上の場合: "Corvus corax" → 親候補は "Corvus"
+        # 学名1語（属名）の場合: root_node を親とする
+        if len(parts) >= 2:
+            parent_name = parts[0]
+            parent_node = name_to_node.get(parent_name, root_node)
+        else:
+            parent_node = root_node
+
+        # 重複追加を防ぐ
+        existing_ids = {c["id"] for c in parent_node["children"]}
+        if qid not in existing_ids:
+            parent_node["children"].append(node)
+
+    pprint(f"    ✅  ワンショット取得: {len(new_nodes)}件 [{root_qid}] {root_node['name']}")
+    return True
+
 
 def _parse_child_row(row: dict, parent_rank: str) -> dict | None:
     """SPARQL 結果1行をノード辞書に変換する。rank 推定も行う。"""
@@ -689,9 +868,11 @@ SELECT (COUNT(?sp) AS ?c) WHERE {{
 
 def fetch_phase1(root_node: dict, split_rank: str) -> tuple[dict, dict]:
     """
-    root_node を起点に split_rank まで BFS する。
+    root_node を起点に split_rank まで BFS する（バッチ取得対応）。
+    キューから最大 BATCH_PARENT_SIZE 件をまとめて1クエリで取得する。
     戻り値: (root_node（子を埋めた状態）, nodes_dict)
     """
+    _stats["phase1_start"] = time.time()
     stop_idx = rank_index(split_rank)
     root_qid = root_node["id"]
     nodes    = {root_qid: root_node}
@@ -699,37 +880,46 @@ def fetch_phase1(root_node: dict, split_rank: str) -> tuple[dict, dict]:
     visited  = {root_qid}
 
     while queue:
-        parent_qid  = queue.popleft()
-        parent_node = nodes[parent_qid]
-        parent_rank = parent_node["rank"]
-        parent_idx  = rank_index(parent_rank)
+        # キューから stop_idx 未満のノードを最大 BATCH_PARENT_SIZE 件取り出す
+        batch_qids = []
+        while queue and len(batch_qids) < BATCH_PARENT_SIZE:
+            qid = queue.popleft()
+            if rank_index(nodes[qid]["rank"]) < stop_idx:
+                batch_qids.append(qid)
+            # stop_idx 以上のノードはスキップ（子を取る必要がない）
 
-        if parent_idx >= stop_idx:
+        if not batch_qids:
             continue
 
-        indent = "  " * min(parent_idx + 1, 6)
-        pja    = parent_node.get("ja", "")
-        pprint(fmt_node(indent, parent_qid, parent_node["name"], pja, parent_rank)
-               + "  ▶取得中…")
-
-        rows = get_direct_children(parent_qid)
-        pprint(f"{indent}{'':12}   → {len(rows)}件")
-
-        for row in rows:
-            node = _parse_child_row(row, parent_rank)
-            if not node or node["id"] in visited: continue
-            visited.add(node["id"])
-            nodes[node["id"]] = node
-            parent_node["children"].append(node)
-
-            ci = rank_index(node["rank"])
-            pprint(fmt_node("  " * min(ci + 2, 8), node["id"],
-                            node["name"], node["ja"], node["rank"]))
-            if ci < stop_idx:
-                queue.append(node["id"])
-
+        pprint(f"  📦 バッチ取得: {len(batch_qids)} ノード")
+        batch_result = get_batch_children(batch_qids)
+        _stats["sleep_total"] += 0.8
         time.sleep(0.8)
 
+        for parent_qid in batch_qids:
+            parent_node = nodes[parent_qid]
+            parent_rank = parent_node["rank"]
+            rows        = batch_result.get(parent_qid, [])
+            indent      = "  " * min(rank_index(parent_rank) + 1, 6)
+            pprint(fmt_node(indent, parent_qid, parent_node["name"],
+                            parent_node.get("ja", ""), parent_rank)
+                   + f"  → {len(rows)}件")
+
+            for row in rows:
+                node = _parse_child_row(row, parent_rank)
+                if not node or node["id"] in visited:
+                    continue
+                visited.add(node["id"])
+                nodes[node["id"]] = node
+                parent_node["children"].append(node)
+
+                ci = rank_index(node["rank"])
+                pprint(fmt_node("  " * min(ci + 2, 8), node["id"],
+                                node["name"], node["ja"], node["rank"]))
+                if ci < stop_idx:
+                    queue.append(node["id"])
+
+    _stats["phase1_elapsed"] = time.time() - _stats["phase1_start"]
     _sort_children(root_node)
     return root_node, nodes
 
@@ -919,7 +1109,8 @@ def get_children_with_supplement(
     parent_name = parent_node["name"]
     parent_rank = parent_node["rank"]
 
-    # ── ① Wikidata P171 直接 ──────────────────────────────────────
+    # ── ① Wikidata P171 直接（単体クエリ：補完フロー用）─────────────
+    _stats["single_queries"] += 1
     rows = get_direct_children(parent_qid)
     nodes_p171 = []
     if rows:
@@ -959,58 +1150,111 @@ def get_children_with_supplement(
 #  Phase 2: split_rank ノードごとにサブBFS（進捗バー付き）
 # ─────────────────────────────────────────────────────────────────
 
+def _register_children(
+    child_rows: list, parent_node: dict, depth: int,
+    nodes_dict: dict, visited: set, stop_idx: int,
+    queue: deque, count_ref: list, strategy: str = STRATEGY_P171,
+) -> None:
+    """取得済み行リストをノード辞書へ登録してキューに積む（共通処理）。"""
+    parent_rank = parent_node["rank"]
+    for row in child_rows:
+        node = _parse_child_row(row, parent_rank)
+        if not node or node["id"] in nodes_dict or node["id"] in visited:
+            continue
+        node.setdefault("fetch_strategy", strategy)
+        visited.add(node["id"])
+        nodes_dict[node["id"]] = node
+        parent_node["children"].append(node)
+        ci = rank_index(node["rank"])
+        mark = (
+            "  [A]" if node.get("fetch_strategy") == STRATEGY_PREFIX
+            else "  [B]" if node.get("fetch_strategy") == STRATEGY_GBIF
+            else ""
+        )
+        pprint(fmt_node("  " * min(depth + 1, 8), node["id"],
+                        node["name"], node["ja"], node["rank"]) + mark)
+        if is_leaf_rank(node["rank"]) or ci >= stop_idx:
+            count_ref[0] += 1
+        else:
+            queue.append((node["id"], depth))
+
+
 def _bfs_subtree(root_node: dict, nodes_dict: dict, stop_rank: str) -> int:
-    """root_node 以下を stop_rank まで BFS。取得した末端ノード数を返す。"""
-    stop_idx  = rank_index(stop_rank)
-    root_ridx = rank_index(root_node["rank"])
-    queue     = deque([(root_node["id"], root_ridx)])
-    # visited: このサブBFS内の既処理QID
-    # nodes_dict のキー集合も使って科をまたいだ重複を防ぐ
-    visited   = {root_node["id"]}
-    count     = 0
+    """
+    root_node 以下を stop_rank まで BFS（バッチ取得対応）。
+
+    ① キューから最大 BATCH_PARENT_SIZE 件をまとめてバッチ取得
+    ② バッチで 0件だった属のみ get_children_with_supplement() で補完
+    取得した末端ノード数を返す。
+    """
+    stop_idx = rank_index(stop_rank)
+    queue    = deque([(root_node["id"], rank_index(root_node["rank"]))])
+    visited  = {root_node["id"]}
+    count    = [0]   # list で参照渡し
 
     while queue:
-        parent_qid, parent_depth = queue.popleft()
-        parent_node = nodes_dict[parent_qid]
-        parent_rank = parent_node["rank"]
-        parent_idx  = rank_index(parent_rank)
-        if parent_idx >= stop_idx: continue
-
-        # visited に nodes_dict 登録済みQIDを追加（科をまたぐ重複防止）
         visited |= nodes_dict.keys()
 
-        child_nodes, strategy = get_children_with_supplement(
-            parent_node, visited, stop_rank
-        )
-        for node in child_nodes:
-            # 二重チェック: nodes_dict にも既存チェック
-            if node["id"] in nodes_dict:
-                continue
-            visited.add(node["id"])
-            ci    = rank_index(node["rank"])
-            depth = parent_depth + 1
-            nodes_dict[node["id"]] = node
-            parent_node["children"].append(node)
+        # stop_idx 未満のノードを最大 BATCH_PARENT_SIZE 件取り出す
+        batch: list[tuple[str, int]] = []
+        while queue and len(batch) < BATCH_PARENT_SIZE:
+            qid, depth = queue.popleft()
+            nd = nodes_dict.get(qid)
+            if nd and rank_index(nd["rank"]) < stop_idx:
+                batch.append((qid, depth))
 
-            strategy_mark = (
-                "  [A]" if node.get("fetch_strategy") == STRATEGY_PREFIX
-                else "  [B]" if node.get("fetch_strategy") == STRATEGY_GBIF
-                else ""
-            )
-            pprint(fmt_node("  " * min(depth + 1, 8), node["id"],
-                            node["name"], node["ja"], node["rank"])
-                   + strategy_mark)
+        if not batch:
+            continue
 
-            if is_leaf_rank(node["rank"]):
-                count += 1
-            elif ci < stop_idx:
-                queue.append((node["id"], depth))
-            else:
-                count += 1
-
+        # ── ① バッチ取得 ────────────────────────────────────────
+        batch_qids   = [qid for qid, _ in batch]
+        batch_result = get_batch_children(batch_qids)
+        _stats["sleep_total"] += 0.8
         time.sleep(0.8)
 
-    return count
+        need_supplement: list[tuple[str, int]] = []
+
+        for parent_qid, depth in batch:
+            parent_node = nodes_dict[parent_qid]
+            rows        = batch_result.get(parent_qid, [])
+
+            if rows:
+                _register_children(rows, parent_node, depth,
+                                   nodes_dict, visited, stop_idx,
+                                   queue, count)
+            else:
+                # バッチで 0件 → 補完候補としてスタック
+                need_supplement.append((parent_qid, depth))
+
+        # ── ② 補完フロー（0件だった属のみ）────────────────────
+        for parent_qid, depth in need_supplement:
+            parent_node = nodes_dict[parent_qid]
+            child_nodes, strategy = get_children_with_supplement(
+                parent_node, visited, stop_rank
+            )
+            if child_nodes:
+                for node in child_nodes:
+                    if node["id"] in nodes_dict or node["id"] in visited:
+                        continue
+                    visited.add(node["id"])
+                    nodes_dict[node["id"]] = node
+                    parent_node["children"].append(node)
+                    ci = rank_index(node["rank"])
+                    mark = (
+                        "  [A]" if node.get("fetch_strategy") == STRATEGY_PREFIX
+                        else "  [B]" if node.get("fetch_strategy") == STRATEGY_GBIF
+                        else ""
+                    )
+                    pprint(fmt_node("  " * min(depth + 1, 8), node["id"],
+                                    node["name"], node["ja"], node["rank"]) + mark)
+                    if is_leaf_rank(node["rank"]) or ci >= stop_idx:
+                        count[0] += 1
+                    else:
+                        queue.append((node["id"], depth))
+            _stats["sleep_total"] += 0.8
+            time.sleep(0.8)
+
+    return count[0]
 
 def fetch_phase2(root_node: dict, nodes_dict: dict,
                  split_rank: str, stop_rank: str,
@@ -1038,6 +1282,8 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
     done_sp = 0
     unit_sp = "種" if stop_rank == "species" else "件"
 
+    _stats["phase2_start"] = time.time()
+    visited_before = set(nodes_dict.keys())  # ワンショット差分計算用の初期値
     pprint(f"\n  📋 Phase 2: {total_p} {split_rank} の子孫を取得します"
            f"  （→ {stop_rank}）")
     if total_sp > 0:
@@ -1047,7 +1293,24 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
         bar_update(done_p, total_p, done_sp, total_sp,
                    f"{nd['name']} [{nd['id']}] 取得開始…")
 
-        n = _bfs_subtree(nd, nodes_dict, stop_rank)
+        # ── ① P171+ ワンショット試行 ──────────────────────────
+        before = len(nodes_dict)
+        ok = fetch_subtree_oneshot(nd, nodes_dict, stop_rank)
+        if ok:
+            _stats["oneshot_hits"] += 1
+            n = sum(
+                1 for qid, node in nodes_dict.items()
+                if qid not in visited_before
+                and (is_leaf_rank(node["rank"])
+                     or rank_index(node["rank"]) >= rank_index(stop_rank))
+            )
+        else:
+            # ── ② フォールバック: バッチBFS ───────────────────
+            _stats["oneshot_miss"] += 1
+            pprint(f"  ↩  ワンショット失敗 → バッチBFS にフォールバック [{nd['id']}]")
+            n = _bfs_subtree(nd, nodes_dict, stop_rank)
+
+        visited_before = set(nodes_dict.keys())  # 次の科の差分計算用
         done_p  += 1
         done_sp += n
 
@@ -1058,8 +1321,10 @@ def fetch_phase2(root_node: dict, nodes_dict: dict,
         )
         bar_update(done_p, total_p, done_sp, total_sp, nd["name"])
 
+    _stats["phase2_elapsed"] = time.time() - _stats.get("phase2_start", time.time())
     bar_done()
     pprint(f"\n  📊 Phase 2 完了: {done_sp:,}{unit_sp} / {done_p}{split_rank}  ({_elapsed()})")
+    print_stats()
     _sort_children(root_node)
 
 # ─────────────────────────────────────────────────────────────────
