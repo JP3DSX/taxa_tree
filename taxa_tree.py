@@ -308,7 +308,7 @@ def main() -> None:
     args = ap.parse_args()
 
     print("\n╔═══════════════════════════════════════════════╗")
-    print("║  🌿  生物分類 汎用系統図ジェネレーター  v6   ║")
+    print("║  🌿  生物分類 汎用系統図ジェネレーター  v6    ║")
     print("╚═══════════════════════════════════════════════╝")
     print(f"   fetch: v{FETCH_VERSION}  │  html: v{HTML_VERSION}")
 
