@@ -24,7 +24,7 @@ import re as _re
 from datetime import datetime
 from pathlib import Path
 
-HTML_VERSION = "1.7"
+HTML_VERSION = "1.8"
 
 # ─────────────────────────────────────────────────────────────────
 #  HTML テンプレート（standalone / web 共通）
@@ -462,6 +462,45 @@ function applyLangOnly() {
     d3.select(this).select(".secondary-lbl").text(lb.secondary);
   });
 }
+// ─── 円形レイアウト：重なり防止 ──────────────────────────────────
+//
+// 問題: d3.tree().size([2π, R]) はノードを角度空間に均等割り当てする。
+//       ノードの視覚サイズ（半径）を無視するため、
+//       ・浅いノードは弧長が短く密集する
+//       ・展開時にリーフ数が変わるとレイアウトが崩れる
+//
+// 解決策:
+//   ① separation(): 深さに応じた相対間隔（D3 標準の radial 推奨式）
+//      a.depth で割ることで浅い層に広い角度を与える
+//   ② rdAutoRadius(): リーフ数×最小弧長 から半径の下限を計算し
+//      スライダー設定値とのmax をとる
+//   ③ applyRdLayout(): 両方をまとめて lay に適用
+//      setLayout('rd') / update() / setRdRadius() から呼ぶ
+
+const RD_MIN_ARC = 18;   // リーフ1個あたりの最小弧長(px)
+
+function rdSeparation(a, b) {
+  // 同じ親なら 1、異なる親なら 2 の相対比で、深さで除算。
+  // 浅い層ほど大きい値になり、弧の短さを補正する。
+  return (a.parent === b.parent ? 1 : 2) / Math.max(a.depth, 1);
+}
+
+function rdAutoRadius() {
+  // 現在表示中のリーフ数から必要最小半径を計算する。
+  // リーフが多いほど半径を広げ、最小弧長 RD_MIN_ARC を保証する。
+  const leaves = root ? root.leaves().length : 1;
+  const minR   = (leaves * RD_MIN_ARC) / (2 * Math.PI);
+  return Math.max(_rdRadius, Math.ceil(minR));
+}
+
+function applyRdLayout() {
+  // separation + 自動半径を lay に適用する。
+  // update() の度に呼ぶことで展開後も常に重なりを防ぐ。
+  const r = rdAutoRadius();
+  lay.size([2 * Math.PI, r]).separation(rdSeparation);
+  return r;  // 実際に使った半径（デバッグ用）
+}
+
 function setLayout(mode) {
   layoutMode = mode;
   localStorage.setItem("taxa_layout", mode);
@@ -469,10 +508,10 @@ function setLayout(mode) {
   document.getElementById("btn-tb").classList.toggle("active", mode === "tb");
   const btnRd = document.getElementById("btn-rd");
   if (btnRd) btnRd.classList.toggle("active", mode === "rd");
-  // radial は size() で全体角度と半径を指定する（nodeSize ではなく）
+  // RD: separation + 自動半径で重なり防止。LR/TB: nodeSize に戻す。
   const rdSizer = document.getElementById("rd-sizer");
   if (mode === "rd") {
-    lay.size([2 * Math.PI, _rdRadius]);
+    applyRdLayout();
     if (rdSizer) rdSizer.style.display = "flex";
   } else {
     lay.nodeSize(layoutNodeSize());
@@ -588,6 +627,8 @@ function ensureClip(qid) {
 function update(src) {
   const W  = mainEl.clientWidth, H = mainEl.clientHeight;
   const tr = d3.transition().duration(220);
+  // RD モード: 展開/折りたたみでリーフ数が変わるたびに再計算
+  if (layoutMode === "rd") applyRdLayout();
   const sx = layoutMode === "rd" ? src.x : (layoutMode === "lr" ? src.x : src.y);
   const sy = layoutMode === "rd" ? src.y : (layoutMode === "lr" ? src.y : src.x);
 
@@ -954,7 +995,7 @@ function setRdRadius(r) {
   _rdRadius = r;
   localStorage.setItem("taxa_rd_r", r);
   if (layoutMode === "rd") {
-    lay.size([2 * Math.PI, r]);
+    applyRdLayout();  // 自動半径と新しい _rdRadius の大きい方を適用
     update(root);
     setTimeout(() => fitV(false), 260);
   }
