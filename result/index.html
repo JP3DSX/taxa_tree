@@ -225,12 +225,12 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
   <header id="lnd-header">
     <h1><span>🌿</span> 系統図 一覧</h1>
     <div style="display:flex;align-items:center;gap:12px">
-      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 13:28</span>
+      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 13:43</span>
       <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">🌙</button>
     </div>
   </header>
   <main id="lnd-main"><div id="lnd-grid"></div></main>
-  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 13:28</footer>
+  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 13:43</footer>
 </div>
 <div id="view-tree">
   <div id="ov"><h2>🌿 系統図を準備中…</h2>
@@ -339,7 +339,7 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
         </div>
       </div>
     </div>
-    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 13:28</div>
+    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 13:43</div>
   </div>
 </div>
 <script>
@@ -801,6 +801,8 @@ function update(src) {
   // 表示ノード数が閾値を超えたら perf-mode でラベルを非表示にする
   svg.classed("perf-mode", visCount > PERF_THRESHOLD);
 
+  // キャッシュ済み画像を即座に適用（デバウンス・レートキュー不要）
+  _applyKnownImages();
   scheduleImageLoad();
 }
 
@@ -1001,6 +1003,40 @@ function doSrch(q) {
   if (hit.size > 0) setTimeout(() => fitV(false), 260);
 }
 
+// ─── 画像 URL キャッシュ（localStorage）────────────────────────
+// 一度正常にロードされた画像 URL を localStorage に記録する。
+// リロード時はレートキューとデバウンスをバイパスして即座に href を適用する。
+// （実際の画像バイトはブラウザの HTTP キャッシュが保持する）
+const _IMG_KNOWN_KEY   = 'taxa_img_known';
+const _IMG_KNOWN_LIMIT = 6000;   // 保存上限（URL 数）
+const _knownImgUrls = new Set(
+  JSON.parse(localStorage.getItem(_IMG_KNOWN_KEY) || '[]')
+);
+
+function _persistKnown() {
+  const arr = [..._knownImgUrls];
+  const trimmed = arr.length > _IMG_KNOWN_LIMIT
+    ? arr.slice(arr.length - _IMG_KNOWN_LIMIT) : arr;
+  try { localStorage.setItem(_IMG_KNOWN_KEY, JSON.stringify(trimmed)); } catch(e) {}
+}
+
+function _markKnown(src) {
+  if (_knownImgUrls.has(src)) return;
+  _knownImgUrls.add(src);
+  _persistKnown();
+}
+
+// キャッシュ済み URL を持つ image 要素に即座に href を適用する。
+// レートキュー・デバウンス不要なので update() から直接呼ぶ。
+function _applyKnownImages() {
+  if (!_knownImgUrls.size) return;
+  g.selectAll("image.species-img").each(function() {
+    const el  = d3.select(this);
+    const src = el.attr("data-src");
+    if (src && !el.attr("href") && _knownImgUrls.has(src)) el.attr("href", src);
+  });
+}
+
 // ─── 画像レイジーロード（ズーム閾値 + デバウンス + レートキュー）
 // IMG_ZOOM_MIN:    この倍率未満では画像ロードしない
 // IMG_DEBOUNCE_MS: ズーム操作停止後に待つ時間(ms)
@@ -1019,7 +1055,14 @@ function _startQueue() {
       clearInterval(_queueTimer); _queueTimer = null; return;
     }
     _imgQueue.splice(0, IMG_RATE_PER_SEC).forEach(({el, src}) => {
-      if (!el.attr("href")) el.attr("href", src);
+      if (el.attr("href")) return;
+      el.attr("href", src);
+      // ロード成功を確認して URL をキャッシュ登録する
+      // （SVG image は load イベントが不安定なため Image オブジェクト経由で検出）
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => _markKnown(src);
+      img.src = src;
     });
   }, 1000);
 }
@@ -1036,7 +1079,8 @@ function _enqueueVisible() {
     checked++;
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    if (!src || el.attr("href")) return;
+    // キャッシュ済みは _applyKnownImages() で処理済みのためスキップ
+    if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
     if (_imgQueue.some(q => q.src === src)) return;
     const nd = d3.select(this.parentNode).datum();
     if (!nd) return;
@@ -1326,7 +1370,7 @@ async function loadViewer(qid) {
     `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? ' (' + taxa.name + ')' : ''} 系統図`;
   const footEl = document.getElementById('foot');
   if (footEl) footEl.textContent =
-    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 13:28`;
+    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 13:43`;
   const bar = document.getElementById('loading-bar');
   const msg = document.getElementById('loading-msg');
   try {

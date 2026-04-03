@@ -773,6 +773,8 @@ function update(src) {
   // 表示ノード数が閾値を超えたら perf-mode でラベルを非表示にする
   svg.classed("perf-mode", visCount > PERF_THRESHOLD);
 
+  // キャッシュ済み画像を即座に適用（デバウンス・レートキュー不要）
+  _applyKnownImages();
   scheduleImageLoad();
 }
 
@@ -973,6 +975,40 @@ function doSrch(q) {
   if (hit.size > 0) setTimeout(() => fitV(false), 260);
 }
 
+// ─── 画像 URL キャッシュ（localStorage）────────────────────────
+// 一度正常にロードされた画像 URL を localStorage に記録する。
+// リロード時はレートキューとデバウンスをバイパスして即座に href を適用する。
+// （実際の画像バイトはブラウザの HTTP キャッシュが保持する）
+const _IMG_KNOWN_KEY   = 'taxa_img_known';
+const _IMG_KNOWN_LIMIT = 6000;   // 保存上限（URL 数）
+const _knownImgUrls = new Set(
+  JSON.parse(localStorage.getItem(_IMG_KNOWN_KEY) || '[]')
+);
+
+function _persistKnown() {
+  const arr = [..._knownImgUrls];
+  const trimmed = arr.length > _IMG_KNOWN_LIMIT
+    ? arr.slice(arr.length - _IMG_KNOWN_LIMIT) : arr;
+  try { localStorage.setItem(_IMG_KNOWN_KEY, JSON.stringify(trimmed)); } catch(e) {}
+}
+
+function _markKnown(src) {
+  if (_knownImgUrls.has(src)) return;
+  _knownImgUrls.add(src);
+  _persistKnown();
+}
+
+// キャッシュ済み URL を持つ image 要素に即座に href を適用する。
+// レートキュー・デバウンス不要なので update() から直接呼ぶ。
+function _applyKnownImages() {
+  if (!_knownImgUrls.size) return;
+  g.selectAll("image.species-img").each(function() {
+    const el  = d3.select(this);
+    const src = el.attr("data-src");
+    if (src && !el.attr("href") && _knownImgUrls.has(src)) el.attr("href", src);
+  });
+}
+
 // ─── 画像レイジーロード（ズーム閾値 + デバウンス + レートキュー）
 // IMG_ZOOM_MIN:    この倍率未満では画像ロードしない
 // IMG_DEBOUNCE_MS: ズーム操作停止後に待つ時間(ms)
@@ -991,7 +1027,14 @@ function _startQueue() {
       clearInterval(_queueTimer); _queueTimer = null; return;
     }
     _imgQueue.splice(0, IMG_RATE_PER_SEC).forEach(({el, src}) => {
-      if (!el.attr("href")) el.attr("href", src);
+      if (el.attr("href")) return;
+      el.attr("href", src);
+      // ロード成功を確認して URL をキャッシュ登録する
+      // （SVG image は load イベントが不安定なため Image オブジェクト経由で検出）
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => _markKnown(src);
+      img.src = src;
     });
   }, 1000);
 }
@@ -1008,7 +1051,8 @@ function _enqueueVisible() {
     checked++;
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    if (!src || el.attr("href")) return;
+    // キャッシュ済みは _applyKnownImages() で処理済みのためスキップ
+    if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
     if (_imgQueue.some(q => q.src === src)) return;
     const nd = d3.select(this.parentNode).datum();
     if (!nd) return;
