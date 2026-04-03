@@ -225,12 +225,12 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
   <header id="lnd-header">
     <h1><span>🌿</span> 系統図 一覧</h1>
     <div style="display:flex;align-items:center;gap:12px">
-      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 14:05</span>
+      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 14:28</span>
       <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">🌙</button>
     </div>
   </header>
   <main id="lnd-main"><div id="lnd-grid"></div></main>
-  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 14:05</footer>
+  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 14:28</footer>
 </div>
 <div id="view-tree">
   <div id="ov"><h2>🌿 系統図を準備中…</h2>
@@ -339,7 +339,7 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
         </div>
       </div>
     </div>
-    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 14:05</div>
+    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 14:28</div>
   </div>
 </div>
 <script>
@@ -1091,8 +1091,9 @@ function _enqueueVisible() {
   g.selectAll("image.species-img").each(function() {
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    // キャッシュ済み・ロード済みは即リターン（スキャン上限にカウントしない）
-    if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
+    // ロード済みは即リターン（スキャン上限にカウントしない）
+    // _applyKnownImages() が先に href をセットしているため el.attr("href") で十分
+    if (!src || el.attr("href")) return;
     if (_imgQueue.some(q => q.src === src)) return;
     // 未ロードの要素のみスキャン上限にカウントする
     if (checked >= IMG_SCAN_CAP) return;
@@ -1385,7 +1386,7 @@ async function loadViewer(qid) {
     `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? ' (' + taxa.name + ')' : ''} 系統図`;
   const footEl = document.getElementById('foot');
   if (footEl) footEl.textContent =
-    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 14:05`;
+    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 14:28`;
   const bar = document.getElementById('loading-bar');
   const msg = document.getElementById('loading-msg');
   try {

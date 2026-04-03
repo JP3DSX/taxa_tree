@@ -1063,8 +1063,9 @@ function _enqueueVisible() {
   g.selectAll("image.species-img").each(function() {
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    // キャッシュ済み・ロード済みは即リターン（スキャン上限にカウントしない）
-    if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
+    // ロード済みは即リターン（スキャン上限にカウントしない）
+    // _applyKnownImages() が先に href をセットしているため el.attr("href") で十分
+    if (!src || el.attr("href")) return;
     if (_imgQueue.some(q => q.src === src)) return;
     // 未ロードの要素のみスキャン上限にカウントする
     if (checked >= IMG_SCAN_CAP) return;
