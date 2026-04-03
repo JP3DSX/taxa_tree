@@ -1061,13 +1061,14 @@ function _enqueueVisible() {
   const svgR = mainEl.getBoundingClientRect();
   let checked = 0;
   g.selectAll("image.species-img").each(function() {
-    if (checked >= IMG_SCAN_CAP) return;
-    checked++;
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    // キャッシュ済みは上の _applyKnownImages() で処理済みのためスキップ
+    // キャッシュ済み・ロード済みは即リターン（スキャン上限にカウントしない）
     if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
     if (_imgQueue.some(q => q.src === src)) return;
+    // 未ロードの要素のみスキャン上限にカウントする
+    if (checked >= IMG_SCAN_CAP) return;
+    checked++;
     const nd = d3.select(this.parentNode).datum();
     if (!nd) return;
     const sx  = layoutMode === "lr" ? nd.y : nd.x;
