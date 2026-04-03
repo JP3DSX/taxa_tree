@@ -185,6 +185,10 @@ svg{width:100%;height:100%}
 #loading-bar-outer{width:220px;height:4px;background:var(--bg3);border-radius:2px}
 #loading-bar{height:4px;width:0%;background:var(--hl);border-radius:2px;
   transition:width .3s}
+/* ── 高速モード（ノード数超過時の簡易表示） ── */
+/* ラベル・セカンダリテキストを非表示にしてレンダリング負荷を下げる */
+svg.perf-mode .nd text { display: none; }
+svg.perf-mode .lk { stroke-opacity: 0.35; }
 /* ── モバイル専用 ── */
 @media (pointer: coarse) {
   #tt{position:fixed !important;left:50% !important;transform:translateX(-50%);
@@ -593,8 +597,9 @@ function init() {
   prog(20, "ツリー解析中…");
   root = d3.hierarchy(DATA);
   root.x0 = 0; root.y0 = 0;
+  invalidateDesc();
   const genusIdx = RANK_ORD.indexOf("genus");
-  root.descendants().forEach(d => {
+  getDesc().forEach(d => {
     const ri = RANK_ORD.indexOf(d.data.rank);
     if (ri >= genusIdx && d.children) { d._children = d.children; d.children = null; }
   });
@@ -623,10 +628,24 @@ function ensureClip(qid) {
   return cid;
 }
 
+// ─── descendants キャッシュ ──────────────────────────────────────
+// root.descendants() は毎回 O(N) の走査を行うため、構造変更時のみ再計算する。
+// ツリー構造を変える操作（tog / expandTo / collapseAll）は必ず invalidateDesc() を呼ぶ。
+let _cachedDesc = null;
+function getDesc() {
+  if (!_cachedDesc) _cachedDesc = root.descendants();
+  return _cachedDesc;
+}
+function invalidateDesc() { _cachedDesc = null; }
+
 // ─── ツリー更新 ─────────────────────────────────────────────────
+// ノード数がこの閾値を超えたらアニメーションを無効化してレンダリングを高速化
+const PERF_THRESHOLD = 600;
+
 function update(src) {
   const W  = mainEl.clientWidth, H = mainEl.clientHeight;
-  const tr = d3.transition().duration(220);
+  const visCount = getDesc().length;
+  const tr = d3.transition().duration(visCount > PERF_THRESHOLD ? 0 : 220);
   // RD モード: 展開/折りたたみでリーフ数が変わるたびに再計算
   if (layoutMode === "rd") applyRdLayout();
   const sx = layoutMode === "rd" ? src.x : (layoutMode === "lr" ? src.x : src.y);
@@ -719,7 +738,10 @@ function update(src) {
     .attr("transform", _ =>
       `translate(${layoutMode==="lr"?src.y:src.x},${layoutMode==="lr"?src.x:src.y})`)
     .style("opacity", 0).remove();
-  root.descendants().forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+  getDesc().forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+
+  // 表示ノード数が閾値を超えたら perf-mode でラベルを非表示にする
+  svg.classed("perf-mode", visCount > PERF_THRESHOLD);
 
   scheduleImageLoad();
 }
@@ -767,23 +789,27 @@ const hk  = d => d.children || d._children;
 const tog = d => {
   if (d.children) { d._children = d.children; d.children = null; }
   else            { d.children = d._children; d._children = null; }
+  invalidateDesc();
 };
 
 // ─── ツリー操作 ─────────────────────────────────────────────────
 function expandTo(rank) {
   const ti = RANK_ORD.indexOf(rank);
   if (ti < 0) return;
-  root.descendants().forEach(d => {
+  // walkAll でツリー全体（非表示ノードを含む）を走査して展開/折りたたみ
+  walkAll(root, d => {
     const di = RANK_ORD.indexOf(d.data.rank);
     if (di < ti && d._children) { d.children = d._children; d._children = null; }
     if (di >= ti && d.children) { d._children = d.children; d.children = null; }
   });
+  invalidateDesc();
   update(root); updStat();
 }
 function collapseAll() {
-  root.descendants().forEach(d => {
+  walkAll(root, d => {
     if (d.depth > 0 && d.children) { d._children = d.children; d.children = null; }
   });
+  invalidateDesc();
   update(root);
 }
 function fitV(instant) {
@@ -798,11 +824,17 @@ function fitV(instant) {
   else         svg.transition().duration(500).call(zm.transform, t);
 }
 function updStat() {
-  const d   = root.descendants();
-  const sp  = d.filter(x => x.data.rank === "species").length;
-  const ge  = d.filter(x => x.data.rank === "genus").length;
-  const fa  = d.filter(x => x.data.rank === "family").length;
-  const im  = d.filter(x => x.data.image_url).length;
+  // 1回の走査で全カウントをまとめて集計する（以前は filter を複数回呼んでいた）
+  let sp = 0, ge = 0, fa = 0, im = 0;
+  const iucnCnt = {};
+  for (const x of getDesc()) {
+    const r = x.data.rank;
+    if (r === "species") sp++;
+    else if (r === "genus")  ge++;
+    else if (r === "family") fa++;
+    if (x.data.image_url) im++;
+    if (x.data.iucn) iucnCnt[x.data.iucn] = (iucnCnt[x.data.iucn] || 0) + 1;
+  }
   // IUCN 集計（EX/EW/CR/EN/VU のみ表示、0件は省略）
   const IUCN_STAT = [
     ["EX", "#6b7280"], ["EW", "#9ca3af"],
@@ -810,7 +842,7 @@ function updStat() {
   ];
   const iucnHtml = IUCN_STAT
     .map(([code, color]) => {
-      const cnt = d.filter(x => x.data.iucn === code).length;
+      const cnt = iucnCnt[code] || 0;
       if (!cnt) return "";
       return `<span style="color:${color};font-size:10px;white-space:nowrap">&#9632; ${code}:${cnt}</span>`;
     }).join("");
@@ -861,9 +893,15 @@ function applyIucnFilter() {
 }
 
 // ─── 検索 ───────────────────────────────────────────────────────
+// 再帰ではなくスタックを使う反復実装。深い系統樹でのスタックオーバーフローを防ぐ。
 function walkAll(node, fn) {
-  fn(node);
-  (node.children || node._children || []).forEach(c => walkAll(c, fn));
+  const stack = [node];
+  while (stack.length) {
+    const n = stack.pop();
+    fn(n);
+    const ch = n.children || n._children;
+    if (ch) for (let i = ch.length - 1; i >= 0; i--) stack.push(ch[i]);
+  }
 }
 function clearSrch() {
   document.getElementById("srch").value = "";
@@ -927,11 +965,17 @@ function _startQueue() {
     });
   }, 1000);
 }
+// 1回のスキャンで処理する画像要素の上限（ノード数が多い場合の過負荷を防ぐ）
+const IMG_SCAN_CAP = 400;
+
 function _enqueueVisible() {
   const t    = d3.zoomTransform(svg.node());
   if (t.k < IMG_ZOOM_MIN) return;
   const svgR = mainEl.getBoundingClientRect();
+  let checked = 0;
   g.selectAll("image.species-img").each(function() {
+    if (checked >= IMG_SCAN_CAP) return;
+    checked++;
     const el  = d3.select(this);
     const src = el.attr("data-src");
     if (!src || el.attr("href")) return;
