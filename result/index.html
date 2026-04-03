@@ -225,12 +225,12 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
   <header id="lnd-header">
     <h1><span>🌿</span> 系統図 一覧</h1>
     <div style="display:flex;align-items:center;gap:12px">
-      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 13:53</span>
+      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 13:59</span>
       <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">🌙</button>
     </div>
   </header>
   <main id="lnd-main"><div id="lnd-grid"></div></main>
-  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 13:53</footer>
+  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 13:59</footer>
 </div>
 <div id="view-tree">
   <div id="ov"><h2>🌿 系統図を準備中…</h2>
@@ -339,7 +339,7 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
         </div>
       </div>
     </div>
-    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 13:53</div>
+    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 13:59</div>
   </div>
 </div>
 <script>
@@ -1083,6 +1083,9 @@ const IMG_SCAN_CAP = 400;
 function _enqueueVisible() {
   const t    = d3.zoomTransform(svg.node());
   if (t.k < IMG_ZOOM_MIN) return;
+  // ズーム後もキャッシュ済み画像を即座に適用する
+  // （update() はズーム操作では呼ばれないためここでも必要）
+  _applyKnownImages();
   const svgR = mainEl.getBoundingClientRect();
   let checked = 0;
   g.selectAll("image.species-img").each(function() {
@@ -1090,7 +1093,7 @@ function _enqueueVisible() {
     checked++;
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    // キャッシュ済みは _applyKnownImages() で処理済みのためスキップ
+    // キャッシュ済みは上の _applyKnownImages() で処理済みのためスキップ
     if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
     if (_imgQueue.some(q => q.src === src)) return;
     const nd = d3.select(this.parentNode).datum();
@@ -1381,7 +1384,7 @@ async function loadViewer(qid) {
     `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? ' (' + taxa.name + ')' : ''} 系統図`;
   const footEl = document.getElementById('foot');
   if (footEl) footEl.textContent =
-    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 13:53`;
+    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 13:59`;
   const bar = document.getElementById('loading-bar');
   const msg = document.getElementById('loading-msg');
   try {

@@ -1055,6 +1055,9 @@ const IMG_SCAN_CAP = 400;
 function _enqueueVisible() {
   const t    = d3.zoomTransform(svg.node());
   if (t.k < IMG_ZOOM_MIN) return;
+  // ズーム後もキャッシュ済み画像を即座に適用する
+  // （update() はズーム操作では呼ばれないためここでも必要）
+  _applyKnownImages();
   const svgR = mainEl.getBoundingClientRect();
   let checked = 0;
   g.selectAll("image.species-img").each(function() {
@@ -1062,7 +1065,7 @@ function _enqueueVisible() {
     checked++;
     const el  = d3.select(this);
     const src = el.attr("data-src");
-    // キャッシュ済みは _applyKnownImages() で処理済みのためスキップ
+    // キャッシュ済みは上の _applyKnownImages() で処理済みのためスキップ
     if (!src || el.attr("href") || _knownImgUrls.has(src)) return;
     if (_imgQueue.some(q => q.src === src)) return;
     const nd = d3.select(this.parentNode).datum();
