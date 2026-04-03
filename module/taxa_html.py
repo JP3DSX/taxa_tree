@@ -481,7 +481,35 @@ function applyLangOnly() {
 //   ③ applyRdLayout(): 両方をまとめて lay に適用
 //      setLayout('rd') / update() / setRdRadius() から呼ぶ
 
-const RD_MIN_ARC = 18;   // リーフ1個あたりの最小弧長(px)
+// ─── ノード衝突回避：最大半径の動的計算 ─────────────────────────
+// 表示中の全ノードの最大円半径を返す。
+// LR/TB の nodeSize と RD の最小弧長の計算に共通して使う。
+const ND_MIN_GAP = 5;   // ノード円同士の最小隙間(px)
+
+function maxVisibleNodeR() {
+  let maxR = 2;
+  for (const d of getDesc()) {
+    const r = nodeR(d);
+    if (r > maxR) maxR = r;
+  }
+  return maxR;
+}
+
+// ─── LR / TB 用：表示ノードの最大半径に基づく動的 nodeSize ──────
+function adaptiveNodeSize() {
+  const minSpacing = 2 * maxVisibleNodeR() + ND_MIN_GAP;
+  // LR: 第1引数が兄弟方向（縦）の間隔 — ここが狭すぎると円が重なる
+  if (layoutMode === "lr") return [Math.max(18, minSpacing), 200];
+  // TB: 第1引数が兄弟方向（横）の間隔
+  if (layoutMode === "tb") return [Math.max(110, minSpacing * 5), 75];
+  return [18, 200];
+}
+
+// ─── RD 用：最小弧長を最大ノード半径から動的に求める ────────────
+function rdMinArc() {
+  // 最大ノード直径 + 隙間 を最小弧長とすることで円の重なりを防ぐ
+  return 2 * maxVisibleNodeR() + ND_MIN_GAP;
+}
 
 function rdSeparation(a, b) {
   // 同じ親なら 1、異なる親なら 2 の相対比で、深さで除算。
@@ -491,9 +519,9 @@ function rdSeparation(a, b) {
 
 function rdAutoRadius() {
   // 現在表示中のリーフ数から必要最小半径を計算する。
-  // リーフが多いほど半径を広げ、最小弧長 RD_MIN_ARC を保証する。
+  // リーフが多いほど半径を広げ、最小弧長 rdMinArc() を保証する。
   const leaves = root ? root.leaves().length : 1;
-  const minR   = (leaves * RD_MIN_ARC) / (2 * Math.PI);
+  const minR   = (leaves * rdMinArc()) / (2 * Math.PI);
   return Math.max(_rdRadius, Math.ceil(minR));
 }
 
@@ -646,8 +674,10 @@ function update(src) {
   const W  = mainEl.clientWidth, H = mainEl.clientHeight;
   const visCount = getDesc().length;
   const tr = d3.transition().duration(visCount > PERF_THRESHOLD ? 0 : 220);
-  // RD モード: 展開/折りたたみでリーフ数が変わるたびに再計算
+  // RD: リーフ数と最大ノード半径から自動半径を再計算
+  // LR/TB: 表示ノードの最大半径に基づき nodeSize を動的調整（円の重なり防止）
   if (layoutMode === "rd") applyRdLayout();
+  else lay.nodeSize(adaptiveNodeSize());
   const sx = layoutMode === "rd" ? src.x : (layoutMode === "lr" ? src.x : src.y);
   const sy = layoutMode === "rd" ? src.y : (layoutMode === "lr" ? src.y : src.x);
 
