@@ -1033,7 +1033,18 @@ function _startQueue() {
       // （SVG image は load イベントが不安定なため Image オブジェクト経由で検出）
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => _markKnown(src);
+      img.onload = () => {
+        _markKnown(src);
+        // ツールチップ用の 250px 版をプリフェッチしてブラウザキャッシュに乗せる
+        // → 初回ホバー時も即座に表示される
+        const large = src.replace(/\/\d+px-/, "/250px-")
+                         .replace(/[?&]width=\d+/, "?width=250");
+        if (large !== src) {
+          const pre = new Image();
+          pre.crossOrigin = 'anonymous';
+          pre.src = large;
+        }
+      };
       img.src = src;
     });
   }, 1000);

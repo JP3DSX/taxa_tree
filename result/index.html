@@ -225,12 +225,12 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
   <header id="lnd-header">
     <h1><span>🌿</span> 系統図 一覧</h1>
     <div style="display:flex;align-items:center;gap:12px">
-      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 13:43</span>
+      <span style="font-size:11px;color:var(--txt3)">更新: 2026-04-03 13:53</span>
       <button class="tb" id="btn-theme-lnd" onclick="toggleTheme()">🌙</button>
     </div>
   </header>
   <main id="lnd-main"><div id="lnd-grid"></div></main>
-  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 13:43</footer>
+  <footer id="lnd-footer">データ: Wikidata &nbsp;|&nbsp; 生成: 2026-04-03 13:53</footer>
 </div>
 <div id="view-tree">
   <div id="ov"><h2>🌿 系統図を準備中…</h2>
@@ -339,7 +339,7 @@ svg.perf-mode .lk { stroke-opacity: 0.35; }
         </div>
       </div>
     </div>
-    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 13:43</div>
+    <div id="foot">QID: &nbsp;|&nbsp; 画像: Wikimedia Commons &nbsp;|&nbsp; 生成: 2026-04-03 13:53</div>
   </div>
 </div>
 <script>
@@ -1061,7 +1061,18 @@ function _startQueue() {
       // （SVG image は load イベントが不安定なため Image オブジェクト経由で検出）
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = () => _markKnown(src);
+      img.onload = () => {
+        _markKnown(src);
+        // ツールチップ用の 250px 版をプリフェッチしてブラウザキャッシュに乗せる
+        // → 初回ホバー時も即座に表示される
+        const large = src.replace(/\/\d+px-/, "/250px-")
+                         .replace(/[?&]width=\d+/, "?width=250");
+        if (large !== src) {
+          const pre = new Image();
+          pre.crossOrigin = 'anonymous';
+          pre.src = large;
+        }
+      };
       img.src = src;
     });
   }, 1000);
@@ -1370,7 +1381,7 @@ async function loadViewer(qid) {
     `<em>${taxa.ja || taxa.name}</em>${taxa.ja ? ' (' + taxa.name + ')' : ''} 系統図`;
   const footEl = document.getElementById('foot');
   if (footEl) footEl.textContent =
-    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 13:43`;
+    `QID: ${taxa.qid} | 画像: Wikimedia Commons | 生成: 2026-04-03 13:53`;
   const bar = document.getElementById('loading-bar');
   const msg = document.getElementById('loading-msg');
   try {
